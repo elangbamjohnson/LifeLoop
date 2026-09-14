@@ -1,0 +1,6 @@
+{
+  "name": "LifeLoop",
+  "description": "A cross-platform personal life-management application. An intelligent 'life admin' system to capture, understand, structure, and remember what matters.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
