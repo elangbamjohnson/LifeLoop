@@ -42,10 +42,11 @@ authRouter.post("/register", authLimiter, async (req, res, next) => {
 
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
     
+    const isSecure = process.env.NODE_ENV === "production" || req.secure || req.headers["x-forwarded-proto"] === "https";
     res.cookie("session", token, {
       httpOnly: true,
-      secure: true, // Required for sameSite: "none"
-      sameSite: "none", // Required for cross-origin iframes (AI Studio preview)
+      secure: isSecure, // Required for sameSite: "none", false for localhost HTTP
+      sameSite: isSecure ? "none" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
@@ -84,10 +85,11 @@ authRouter.post("/login", authLimiter, async (req, res, next) => {
 
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
     
+    const isSecure = process.env.NODE_ENV === "production" || req.secure || req.headers["x-forwarded-proto"] === "https";
     res.cookie("session", token, {
       httpOnly: true,
-      secure: true,
-      sameSite: "none",
+      secure: isSecure,
+      sameSite: isSecure ? "none" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 

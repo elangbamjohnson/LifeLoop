@@ -115,6 +115,57 @@ familiesRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res, nex
   }
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// NOTIFICATIONS — must be before /:id to avoid param collision
+// ────────────────────────────────────────────────────────────────────────────
+
+// GET /families/notifications
+familiesRouter.get(
+  "/notifications",
+  requireAuth,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const notifications = await db
+        .select()
+        .from(familyNotifications)
+        .where(eq(familyNotifications.userId, req.userId!))
+        .orderBy(desc(familyNotifications.createdAt))
+        .limit(50);
+
+      res.json({ notifications });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// PATCH /families/notifications/:notifId/read
+familiesRouter.patch(
+  "/notifications/:notifId/read",
+  requireAuth,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      await db
+        .update(familyNotifications)
+        .set({ isRead: 1 })
+        .where(
+          and(
+            eq(familyNotifications.id, req.params.notifId),
+            eq(familyNotifications.userId, req.userId!)
+          )
+        );
+
+      res.json({ success: true });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// ────────────────────────────────────────────────────────────────────────────
+// FAMILIES — parameterised routes (/:id must come after all fixed paths)
+// ────────────────────────────────────────────────────────────────────────────
+
 // GET /families/:id — get family details + members
 familiesRouter.get(
   "/:id",
@@ -611,53 +662,6 @@ familiesRouter.delete(
       }
 
       await db.delete(sharedItems).where(eq(sharedItems.id, req.params.sharedItemId));
-      res.json({ success: true });
-    } catch (err) {
-      next(err);
-    }
-  }
-);
-
-// ────────────────────────────────────────────────────────────────────────────
-// NOTIFICATIONS
-// ────────────────────────────────────────────────────────────────────────────
-
-// GET /families/notifications — get unread notifications for the current user
-familiesRouter.get(
-  "/notifications",
-  requireAuth,
-  async (req: AuthenticatedRequest, res, next) => {
-    try {
-      const notifications = await db
-        .select()
-        .from(familyNotifications)
-        .where(eq(familyNotifications.userId, req.userId!))
-        .orderBy(desc(familyNotifications.createdAt))
-        .limit(50);
-
-      res.json({ notifications });
-    } catch (err) {
-      next(err);
-    }
-  }
-);
-
-// PATCH /families/notifications/:id/read
-familiesRouter.patch(
-  "/notifications/:notifId/read",
-  requireAuth,
-  async (req: AuthenticatedRequest, res, next) => {
-    try {
-      await db
-        .update(familyNotifications)
-        .set({ isRead: 1 })
-        .where(
-          and(
-            eq(familyNotifications.id, req.params.notifId),
-            eq(familyNotifications.userId, req.userId!)
-          )
-        );
-
       res.json({ success: true });
     } catch (err) {
       next(err);
