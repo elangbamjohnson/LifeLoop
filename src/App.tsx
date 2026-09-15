@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "./client/hooks/useAuth";
 import { ThemeProvider } from "./client/hooks/useTheme";
 import { AuthScreen } from "./client/features/auth/AuthScreen";
 import { Dashboard } from "./client/features/dashboard/Dashboard";
+import { DeviceSimulator } from "./client/features/simulator/DeviceSimulator";
 
 function AppRoutes() {
   const { user, loading } = useAuth();
@@ -39,7 +40,9 @@ export default function App() {
     <ThemeProvider>
       <AuthProvider>
         <Router>
-          <AppRoutes />
+          <DeviceSimulator>
+            <AppRoutes />
+          </DeviceSimulator>
         </Router>
       </AuthProvider>
     </ThemeProvider>

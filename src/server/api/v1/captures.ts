@@ -36,25 +36,38 @@ capturesRouter.post("/", requireAuth, upload.single("file"), async (req: Authent
       return res.status(400).json({ error: "Text payload or file is required" });
     }
 
-    // Insert into DB as pending
-    const [capture] = await db
-      .insert(captures)
-      .values({
-        userId: req.userId!,
-        source,
-        type,
-        rawPayload: finalPayload,
-        originalFilename,
-        mimeType,
-        processingStatus: "pending",
-      })
-      .returning();
+    if (type === "text" && finalPayload && finalPayload.length > 10000) {
+      return res.status(400).json({ error: "Text payload exceeds maximum allowed length of 10,000 characters." });
+    }
+
+    let capture;
+    try {
+      const [inserted] = await db
+        .insert(captures)
+        .values({
+          userId: req.userId!,
+          source,
+          type,
+          rawPayload: finalPayload,
+          originalFilename,
+          mimeType,
+          processingStatus: "pending",
+        })
+        .returning();
+      capture = inserted;
+    } catch (insertError) {
+      if (req.file && finalPayload) {
+        // Clean up orphaned file
+        await storage.deleteFile(finalPayload).catch(e => (req as any).log?.error(e, "Failed to clean up orphaned file"));
+      }
+      throw insertError;
+    }
 
     res.status(201).json({ capture });
 
     // Kick off async processing (fire and forget for now)
-    processCaptureAsync(capture.id, req.userId!, capture.rawPayload, capture.type).catch(e => {
-      req.log.error(e, `Async processing failed for capture ${capture.id}`);
+    processCaptureAsync(capture.id, req.userId!, capture.rawPayload, capture.type, (req as any).log).catch(e => {
+      (req as any).log?.error(e, `Async processing failed for capture ${capture.id}`);
     });
 
   } catch (error) {
@@ -63,13 +76,17 @@ capturesRouter.post("/", requireAuth, upload.single("file"), async (req: Authent
 });
 
 // Async processing helper
-async function processCaptureAsync(captureId: string, userId: string, payload: string, type: string) {
+async function processCaptureAsync(captureId: string, userId: string, payload: string, type: string, logger: any) {
   try {
     await db.update(captures).set({ processingStatus: "processing" }).where(eq(captures.id, captureId));
     await aiProvider.processCapture(captureId, userId, payload, type);
     await db.update(captures).set({ processingStatus: "completed" }).where(eq(captures.id, captureId));
   } catch (error) {
-    console.error(`Processing failed for ${captureId}:`, error);
+    if (logger) {
+      logger.error(error, `Processing failed for ${captureId}`);
+    } else {
+      console.error(`Processing failed for ${captureId}:`, error);
+    }
     await db.update(captures).set({ processingStatus: "failed" }).where(eq(captures.id, captureId));
   }
 }

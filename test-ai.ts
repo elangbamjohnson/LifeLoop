@@ -9,6 +9,7 @@ async function run() {
   
   const [capture] = await db.insert(captures).values({
     userId: user.id,
+    source: "cli",
     type: "text",
     rawPayload: "I just bought a honda city",
     processingStatus: "pending"
