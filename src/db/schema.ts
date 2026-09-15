@@ -6,6 +6,8 @@ import {
   jsonb,
   varchar,
   integer,
+  real,
+  unique,
 } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
@@ -14,6 +16,7 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   settings: jsonb("settings").default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
 });
 
 export const captures = pgTable("captures", {
@@ -27,6 +30,7 @@ export const captures = pgTable("captures", {
   processingStatus: varchar("processing_status", { length: 50 }).default("pending").notNull(), // pending, processing, completed, failed
   metadata: jsonb("metadata").default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
 });
 
 export const items = pgTable("items", {
@@ -36,12 +40,13 @@ export const items = pgTable("items", {
   title: text("title").notNull(),
   itemType: varchar("item_type", { length: 50 }).notNull(), // payment, task, renewal, appointment, warranty, subscription, purchase, document, waiting_for, reminder, deadline
   status: varchar("status", { length: 50 }).default("pending_review").notNull(), // pending_review, active, completed, snoozed, archived
-  confidenceScore: jsonb("confidence_score"), // number (0-1)
+  confidenceScore: real("confidence_score"), // number (0-1)
   dueDate: timestamp("due_date", { withTimezone: true }),
   snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   metadata: jsonb("metadata").default({}), // amounts, dates, custom fields based on type
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
 });
 
 export const reminders = pgTable("reminders", {
@@ -59,6 +64,7 @@ export const reminders = pgTable("reminders", {
   snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
   metadata: jsonb("metadata").default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
 });
 
 export const itemRelations = pgTable("item_relations", {
@@ -70,7 +76,10 @@ export const itemRelations = pgTable("item_relations", {
   status: varchar("status", { length: 50 }).default("pending_review").notNull(), // pending_review, active, rejected
   metadata: jsonb("metadata").default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+  updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+}, (t) => ({
+  unq: unique().on(t.sourceItemId, t.targetItemId, t.relationshipType)
+}));
 
 export const notificationLogs = pgTable("notification_logs", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -82,5 +91,6 @@ export const notificationLogs = pgTable("notification_logs", {
   deliveredAt: timestamp("delivered_at", { withTimezone: true }),
   payload: jsonb("payload").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
 });
 

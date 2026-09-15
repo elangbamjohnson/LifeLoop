@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
@@ -18,7 +19,7 @@ async function startServer() {
   // Trust the proxy to correctly resolve client IP for rate limiting behind Cloud Run / AI Studio infrastructure
   app.set("trust proxy", 1);
   
-  const PORT = 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   // Middleware
   app.use(pinoHttp({
@@ -63,8 +64,10 @@ async function startServer() {
   // Error Handler (must be last)
   app.use(errorHandler);
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+  const server = app.listen(PORT, "0.0.0.0", () => {
+    const address = server.address();
+    const actualPort = typeof address === "string" ? PORT : address?.port;
+    console.log(`Server running on http://localhost:${actualPort}`);
   });
 }
 

@@ -9,8 +9,10 @@ import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
 
 export const authRouter = Router();
 
-const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_development_only";
-
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error("FATAL: JWT_SECRET environment variable is missing");
+}
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // Increased limit for testing
