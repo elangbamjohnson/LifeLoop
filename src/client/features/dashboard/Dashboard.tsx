@@ -18,7 +18,8 @@ import {
   FileText,
   Smartphone,
   Bot,
-  Network
+  Network,
+  Users
 } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 import { CaptureDialog } from "./CaptureDialog";
@@ -30,6 +31,7 @@ import { AskView } from "./AskView";
 import { LifeGraphView } from "./LifeGraphView";
 import { EntityDetailView } from "./EntityDetailView";
 import { groupItemsIntoTimeline, TimelineItem, TimelineGrouping } from "../../../shared/utils/timeline";
+import { FamilyPage } from "../family/FamilyPage";
 
 interface Capture {
   id: string;
@@ -42,7 +44,8 @@ interface Capture {
 
 export function Dashboard() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<"priority" | "timeline" | "captures" | "ask" | "graph">("priority");
+  const [activeTab, setActiveTab] = useState<"priority" | "timeline" | "captures" | "ask" | "graph" | "family">("priority");
+  const [familyUnreadCount, setFamilyUnreadCount] = useState(0);
   const [activeEntity, setActiveEntity] = useState<TimelineItem | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -371,6 +374,23 @@ export function Dashboard() {
               >
                 <Network className="w-3.5 h-3.5 text-purple-500" />
                 Entities
+              </button>
+              <button
+                id="tab-family"
+                onClick={() => { setActiveTab("family"); setActiveEntity(null); }}
+                className={`relative px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  activeTab === "family"
+                    ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
+                    : "hover:text-[#1C1917] dark:hover:text-white"
+                }`}
+              >
+                <Users className="w-3.5 h-3.5 text-emerald-500" />
+                Family
+                {familyUnreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                    {familyUnreadCount > 9 ? "9+" : familyUnreadCount}
+                  </span>
+                )}
               </button>
             </div>
           </div>
@@ -783,6 +803,13 @@ export function Dashboard() {
                 onOpenEntity={setActiveEntity}
               />
            )
+        )}
+
+        {/* ---------------------------------------------------- */}
+        {/* VIEW 6: FAMILY                                        */}
+        {/* ---------------------------------------------------- */}
+        {activeTab === "family" && (
+          <FamilyPage />
         )}
       </main>
 

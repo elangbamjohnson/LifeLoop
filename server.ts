@@ -11,6 +11,7 @@ import { itemsRouter } from "./src/server/api/v1/items";
 import { remindersRouter } from "./src/server/api/v1/reminders";
 import { askRouter } from "./src/server/api/v1/ask";
 import { relationsRouter } from "./src/server/api/v1/relations";
+import { familiesRouter } from "./src/server/api/v1/families";
 import { errorHandler } from "./src/server/middlewares/errorHandler";
 
 async function startServer() {
@@ -40,6 +41,7 @@ async function startServer() {
   app.use("/api/v1/reminders", remindersRouter);
   app.use("/api/v1/ask", askRouter);
   app.use("/api/v1/relations", relationsRouter);
+  app.use("/api/v1/families", familiesRouter);
   
   app.get("/api/v1/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });

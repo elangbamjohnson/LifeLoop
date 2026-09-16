@@ -1,12 +1,40 @@
 import { Router } from "express";
 import { db } from "../../../db";
-import { items, reminders } from "../../../db/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { items, reminders, sharedItems, familyMembers } from "../../../db/schema";
+import { eq, desc, and, inArray } from "drizzle-orm";
 import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
 import { reminderService } from "../../services/ReminderService";
 import { groupItemsIntoTimeline, TimelineItem } from "../../../shared/utils/timeline";
 
 export const itemsRouter = Router();
+
+// Create item manually (for tasks, waiting_for, entities, etc.)
+itemsRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { title, itemType, status = "active", dueDate, metadata = {}, confidenceScore = 1.0 } = req.body;
+
+    if (!title || !itemType) {
+      return res.status(400).json({ error: "Title and itemType are required" });
+    }
+
+    const [item] = await db
+      .insert(items)
+      .values({
+        userId: req.userId!,
+        title: title.trim(),
+        itemType,
+        status,
+        dueDate: dueDate ? new Date(dueDate) : null,
+        confidenceScore,
+        metadata,
+      })
+      .returning();
+
+    res.status(201).json({ item });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Get all parsed items for user
 itemsRouter.get("/", requireAuth, async (req: AuthenticatedRequest, res, next) => {
@@ -23,7 +51,7 @@ itemsRouter.get("/", requireAuth, async (req: AuthenticatedRequest, res, next) =
   }
 });
 
-// Get Life Timeline grouping
+// Get Life Timeline grouping (must be before /:id to avoid param collision)
 itemsRouter.get("/timeline", requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
     const userItems = await db
@@ -47,6 +75,55 @@ itemsRouter.get("/timeline", requireAuth, async (req: AuthenticatedRequest, res,
 
     const timeline = groupItemsIntoTimeline(timelineItems, new Date());
     res.json({ timeline, total: userItems.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get single item by ID (accessible by owner or family member if shared)
+itemsRouter.get("/:id", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const [item] = await db
+      .select()
+      .from(items)
+      .where(eq(items.id, id))
+      .limit(1);
+
+    if (!item) {
+      return res.status(404).json({ error: "Item not found" });
+    }
+
+    // If caller is the owner, allow access
+    if (item.userId === req.userId) {
+      return res.json({ item });
+    }
+
+    // Check if the item is shared to any family where req.userId is an accepted member
+    const sharedRecord = await db
+      .select({
+        sharedId: sharedItems.id,
+        canEdit: sharedItems.canEdit,
+      })
+      .from(sharedItems)
+      .innerJoin(
+        familyMembers,
+        and(
+          eq(familyMembers.familyId, sharedItems.familyId),
+          eq(familyMembers.userId, req.userId!),
+          eq(familyMembers.status, "accepted")
+        )
+      )
+      .where(eq(sharedItems.itemId, id))
+      .limit(1);
+
+    if (sharedRecord.length > 0) {
+      return res.json({ item, isShared: true, canEdit: sharedRecord[0].canEdit === 1 });
+    }
+
+    // If item is not owned by user and not shared with user's family
+    return res.status(403).json({ error: "Access denied: this item is private to its owner" });
   } catch (error) {
     next(error);
   }

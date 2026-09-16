@@ -8,10 +8,9 @@ import { db } from '../src/db';
 import { users, items } from '../src/db/schema';
 import { eq } from 'drizzle-orm';
 
-const app = express();
-app.use(express.json());
-app.use(cookieParser());
-app.use('/api/v1/items', itemsRouter);
+import { createTestApp } from './setup';
+
+const app = createTestApp('/api/v1/items', itemsRouter);
 
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_development_only";
 

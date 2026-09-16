@@ -9,6 +9,7 @@ import { ThemeProvider } from "./client/hooks/useTheme";
 import { AuthScreen } from "./client/features/auth/AuthScreen";
 import { Dashboard } from "./client/features/dashboard/Dashboard";
 import { DeviceSimulator } from "./client/features/simulator/DeviceSimulator";
+import { AcceptInvitePage } from "./client/features/family/AcceptInvitePage";
 
 function AppRoutes() {
   const { user, loading } = useAuth();
@@ -30,6 +31,10 @@ function AppRoutes() {
       <Route
         path="/auth"
         element={!user ? <AuthScreen /> : <Navigate to="/" replace />}
+      />
+      <Route
+        path="/accept-invite"
+        element={user ? <AcceptInvitePage /> : <Navigate to="/auth" replace />}
       />
     </Routes>
   );

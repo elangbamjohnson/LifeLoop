@@ -15,7 +15,8 @@ if (!JWT_SECRET) {
 }
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Increased limit for testing
+  max: 100,
+  skip: () => process.env.NODE_ENV === "test",
   message: { error: "Too many login attempts, please try again later" },
   validate: { xForwardedForHeader: false, default: true }
 });
@@ -25,11 +26,21 @@ authRouter.post("/register", authLimiter, async (req, res, next) => {
   try {
     const { email, password } = req.body;
     
-    if (!email || !password) {
+    if (!email || typeof email !== "string" || !password || typeof password !== "string") {
       return res.status(400).json({ error: "Email and password required" });
     }
 
-    const existing = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    const normalizedEmail = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(normalizedEmail)) {
+      return res.status(400).json({ error: "Invalid email format" });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters long" });
+    }
+
+    const existing = await db.select().from(users).where(eq(users.email, normalizedEmail)).limit(1);
     if (existing.length > 0) {
       return res.status(400).json({ error: "Email already in use" });
     }
@@ -37,19 +48,20 @@ authRouter.post("/register", authLimiter, async (req, res, next) => {
     const passwordHash = await bcrypt.hash(password, 10);
     const [user] = await db
       .insert(users)
-      .values({ email, passwordHash })
+      .values({ email: normalizedEmail, passwordHash })
       .returning({ id: users.id, email: users.email });
 
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
     
+    const isSecure = process.env.NODE_ENV === "production" || req.secure || req.headers["x-forwarded-proto"] === "https";
     res.cookie("session", token, {
       httpOnly: true,
-      secure: true, // Required for sameSite: "none"
-      sameSite: "none", // Required for cross-origin iframes (AI Studio preview)
+      secure: isSecure, // Required for sameSite: "none", false for localhost HTTP
+      sameSite: isSecure ? "none" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
-    res.json({ user });
+    res.status(201).json({ user });
   } catch (error) {
     next(error);
   }
@@ -60,34 +72,30 @@ authRouter.post("/login", authLimiter, async (req, res, next) => {
   try {
     const { email, password } = req.body;
     
-    if (!email || !password) {
+    if (!email || typeof email !== "string" || !password || typeof password !== "string") {
       return res.status(400).json({ error: "Email and password required" });
     }
 
-    let [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const [user] = await db.select().from(users).where(eq(users.email, normalizedEmail)).limit(1);
     
-    // Bypass authentication: Auto-create user if they don't exist
     if (!user) {
-      const passwordHash = await bcrypt.hash(password || "dummy", 10);
-      const [newUser] = await db
-        .insert(users)
-        .values({ email, passwordHash })
-        .returning();
-      user = newUser;
+      return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    // Ignore password validation (bypassed for testing)
-    // const isValid = await bcrypt.compare(password, user.passwordHash);
-    // if (!isValid) {
-    //   return res.status(401).json({ error: "Invalid credentials" });
-    // }
+    const isValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isValid) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
 
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
     
+    const isSecure = process.env.NODE_ENV === "production" || req.secure || req.headers["x-forwarded-proto"] === "https";
     res.cookie("session", token, {
       httpOnly: true,
-      secure: true,
-      sameSite: "none",
+      secure: isSecure,
+      sameSite: isSecure ? "none" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -99,7 +107,12 @@ authRouter.post("/login", authLimiter, async (req, res, next) => {
 
 // Logout
 authRouter.post("/logout", (req, res) => {
-  res.clearCookie("session");
+  const isSecure = process.env.NODE_ENV === "production" || req.secure || req.headers["x-forwarded-proto"] === "https";
+  res.clearCookie("session", {
+    httpOnly: true,
+    secure: isSecure,
+    sameSite: isSecure ? "none" : "lax",
+  });
   res.json({ success: true });
 });
 

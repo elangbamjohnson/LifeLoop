@@ -16,8 +16,7 @@ export function errorHandler(
   }
 
   res.status(status).json({
-    error: {
-      message,
-    },
+    error: message,
+    message,
   });
 }

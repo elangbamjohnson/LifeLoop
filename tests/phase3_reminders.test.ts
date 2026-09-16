@@ -11,11 +11,9 @@ import { eq, and } from "drizzle-orm";
 import { reminderService } from "../src/server/services/ReminderService";
 import { notificationDispatcher } from "../src/server/services/NotificationProvider";
 
-const app = express();
-app.use(express.json());
-app.use(cookieParser());
-app.use("/api/v1/items", itemsRouter);
-app.use("/api/v1/reminders", remindersRouter);
+import { createTestApp } from './setup';
+
+const app = createTestApp('/api/v1/items', itemsRouter);
 
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_development_only";
 
@@ -305,5 +303,120 @@ describe("Phase 3: Reminders, Life Timeline & Real Dashboard", () => {
       .where(eq(reminders.itemId, tempItem.id));
 
     expect(remainingReminders.length).toBe(0);
+  });
+
+  // Test 12: Direct reminder PATCH (Update)
+  it("should update reminder title, time, and recurrence via PATCH /api/v1/reminders/:id", async () => {
+    const [rem] = await db
+      .insert(reminders)
+      .values({
+        userId: testUserId,
+        title: "Initial Reminder Title",
+        scheduledAt: new Date("2026-10-01T10:00:00Z"),
+        channel: "web",
+      })
+      .returning();
+
+    const newTime = "2026-10-05T14:00:00.000Z";
+    const res = await request(app)
+      .patch(`/api/v1/reminders/${rem.id}`)
+      .set("Cookie", authCookie)
+      .send({
+        title: "Updated Reminder Title",
+        scheduledAt: newTime,
+        recurrence: "weekly",
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.reminder.title).toBe("Updated Reminder Title");
+    expect(res.body.reminder.recurrence).toBe("weekly");
+    expect(new Date(res.body.reminder.scheduledAt).toISOString()).toBe(newTime);
+  });
+
+  // Test 13: Direct reminder DELETE
+  it("should delete an individual reminder via DELETE /api/v1/reminders/:id", async () => {
+    const [rem] = await db
+      .insert(reminders)
+      .values({
+        userId: testUserId,
+        title: "To Be Deleted Reminder",
+        scheduledAt: new Date("2026-10-10T10:00:00Z"),
+        channel: "web",
+      })
+      .returning();
+
+    const res = await request(app)
+      .delete(`/api/v1/reminders/${rem.id}`)
+      .set("Cookie", authCookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    const check = await db.select().from(reminders).where(eq(reminders.id, rem.id));
+    expect(check.length).toBe(0);
+  });
+
+  // Test 14: Overdue item categorization and chronological sorting in timeline
+  it("should categorize past-due items in needsAttention/past and maintain timeline ordering", async () => {
+    // Insert an overdue item (due 3 days ago)
+    const [overdueItem] = await db
+      .insert(items)
+      .values({
+        userId: testUserId,
+        title: "Overdue Gas Bill",
+        itemType: "payment",
+        status: "active",
+        dueDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+      })
+      .returning();
+
+    const res = await request(app)
+      .get("/api/v1/items/timeline")
+      .set("Cookie", authCookie);
+
+    expect(res.status).toBe(200);
+    const needsAttention = res.body.timeline.needsAttention;
+    expect(needsAttention).toBeInstanceOf(Array);
+    expect(needsAttention.some((i: any) => i.id === overdueItem.id)).toBe(true);
+
+    // Cleanup overdue item
+    await db.delete(items).where(eq(items.id, overdueItem.id));
+  });
+
+  // Test 15: Cross-user reminder IDOR protection
+  it("should prevent User B from updating or deleting User A's reminder", async () => {
+    // Create User B
+    const [userB] = await db
+      .insert(users)
+      .values({ email: `userb_rem_${Date.now()}@example.com`, passwordHash: "dummy" })
+      .returning();
+    const userBCookie = `session=${jwt.sign({ userId: userB.id }, JWT_SECRET)}`;
+
+    const [userAReminder] = await db
+      .insert(reminders)
+      .values({
+        userId: testUserId,
+        title: "User A Sensitive Reminder",
+        scheduledAt: new Date("2026-11-01T10:00:00Z"),
+        channel: "web",
+      })
+      .returning();
+
+    // User B attempts to PATCH User A's reminder -> 404 (ownership check)
+    const patchRes = await request(app)
+      .patch(`/api/v1/reminders/${userAReminder.id}`)
+      .set("Cookie", userBCookie)
+      .send({ title: "Hacked Title" });
+    expect(patchRes.status).toBe(404);
+
+    // User B attempts to DELETE User A's reminder -> 404 (ownership check)
+    const deleteRes = await request(app)
+      .delete(`/api/v1/reminders/${userAReminder.id}`)
+      .set("Cookie", userBCookie);
+    expect(deleteRes.status).toBe(404);
+
+    // Cleanup
+    await db.delete(reminders).where(eq(reminders.id, userAReminder.id));
+    await db.delete(users).where(eq(users.id, userB.id));
   });
 });

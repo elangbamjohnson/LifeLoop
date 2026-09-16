@@ -22,6 +22,24 @@ export class MockAIProvider implements AIProvider {
     const userSettings = (user?.settings as any) || {};
     const autoRemindersEnabled = userSettings.autoReminders === true;
     const userTimezone = userSettings.timezone || "UTC";
+
+    // TEST SCENARIOS (Deterministic Invalid States)
+    if (rawPayload.includes("TEST_PROVIDER_ERROR")) {
+      throw new Error("Simulated Provider Error");
+    }
+    if (rawPayload.includes("TEST_TIMEOUT")) {
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      throw new Error("Simulated Provider Timeout");
+    }
+    if (rawPayload.includes("TEST_MALFORMED_JSON")) {
+      // Simulate attempting to parse malformed JSON returned by LLM
+      JSON.parse("{ malformed: json ");
+    }
+    if (rawPayload.includes("TEST_NULL_RESPONSE")) {
+      // Simulate empty response from LLM, causing no items to be extracted
+      console.log(`[AI MOCK] Empty response for capture ${captureId}`);
+      return;
+    }
     
     // 1. Payment
     if (lower.includes("electricity bill") || lower.includes("bill") || lower.includes("due")) {
@@ -221,7 +239,17 @@ export class MockAIProvider implements AIProvider {
       let suggestedRelationTitle = null;
       
       for (const entity of userEntities) {
-         if (lower.includes(entity.title.toLowerCase()) || (entity.metadata as any)?.keywords?.some((k: string) => lower.includes(k))) {
+         const entityTitleLower = entity.title.toLowerCase();
+         const meta = (entity.metadata as any) || {};
+         const make = (meta.make || "").toLowerCase();
+         const model = (meta.model || "").toLowerCase();
+         const keywords: string[] = meta.keywords || [];
+
+         if (
+           lower.includes(entityTitleLower) ||
+           (make && model && lower.includes(make) && lower.includes(model.split(" ")[0])) ||
+           keywords.some((k: string) => lower.includes(k))
+         ) {
             suggestedRelationTargetId = entity.id;
             suggestedRelationTitle = entity.title;
             break;

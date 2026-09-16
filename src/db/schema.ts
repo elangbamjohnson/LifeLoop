@@ -94,3 +94,52 @@ export const notificationLogs = pgTable("notification_logs", {
   updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
 });
 
+// ─── Phase 7: Family ────────────────────────────────────────────────────────
+
+export const families = pgTable("families", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 255 }).notNull(),
+  ownerId: uuid("owner_id").references(() => users.id).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
+export const familyMembers = pgTable("family_members", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  familyId: uuid("family_id").references(() => families.id, { onDelete: "cascade" }).notNull(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }), // null until accepted
+  invitedEmail: varchar("invited_email", { length: 255 }).notNull(),
+  role: varchar("role", { length: 50 }).notNull().default("member"), // owner, admin, member, view_only
+  status: varchar("status", { length: 50 }).notNull().default("pending"), // pending, accepted, rejected
+  invitedByUserId: uuid("invited_by_user_id").references(() => users.id),
+  inviteToken: text("invite_token").unique(),
+  inviteExpiresAt: timestamp("invite_expires_at", { withTimezone: true }),
+  joinedAt: timestamp("joined_at", { withTimezone: true }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
+export const sharedItems = pgTable("shared_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  familyId: uuid("family_id").references(() => families.id, { onDelete: "cascade" }).notNull(),
+  itemId: uuid("item_id").references(() => items.id, { onDelete: "cascade" }).notNull(),
+  sharedByUserId: uuid("shared_by_user_id").references(() => users.id).notNull(),
+  category: varchar("category", { length: 100 }).notNull(), // bills, school_events, appointments, shopping, documents, reminders, vehicle
+  canEdit: integer("can_edit").notNull().default(0), // 0=view only, 1=can edit
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+}, (t) => ({
+  unq: unique().on(t.familyId, t.itemId),
+}));
+
+export const familyNotifications = pgTable("family_notifications", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  familyId: uuid("family_id").references(() => families.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  type: varchar("type", { length: 100 }).notNull(), // item_shared, member_joined, invite_received, item_updated
+  payload: jsonb("payload").notNull().default({}),
+  isRead: integer("is_read").notNull().default(0), // 0=unread, 1=read
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+
