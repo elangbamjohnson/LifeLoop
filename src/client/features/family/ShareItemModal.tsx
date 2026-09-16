@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { X, Share2 } from "lucide-react";
+import { X, Share2, Lock } from "lucide-react";
 
 interface UserItem {
   id: string;
@@ -74,6 +74,13 @@ export function ShareItemModal({ familyId, onClose, onShared }: Props) {
           <button onClick={onClose} className="p-1 rounded-lg hover:bg-[#F5F5F4] dark:hover:bg-[#3C3C3C] transition-colors">
             <X size={18} className="text-[#78716C]" />
           </button>
+        </div>
+
+        <div className="mx-5 mt-4 p-3 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 rounded-xl flex items-start gap-2.5 text-xs text-emerald-800 dark:text-emerald-300">
+          <Lock size={15} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <span>
+            <strong>Private by Default:</strong> All items in LifeLoop are 100% private to you. An item is ONLY shared if you select and confirm it below.
+          </span>
         </div>
 
         <form onSubmit={handleShare} className="p-5 space-y-4">

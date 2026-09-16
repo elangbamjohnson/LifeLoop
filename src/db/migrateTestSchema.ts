@@ -2,7 +2,9 @@ import dotenv from "dotenv";
 dotenv.config();
 import postgres from "postgres";
 
-const connectionString = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL!;
+const rawConnectionString = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL!;
+// Always use unpooled direct Neon connection for test schema migrations to avoid tainting the pool
+const connectionString = rawConnectionString.replace("-pooler", "");
 
 export async function setupTestSchema() {
   const sql = postgres(connectionString);
@@ -12,9 +14,6 @@ export async function setupTestSchema() {
 
     // 1. Create isolated schema
     await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS lifeloop_test;`);
-
-    // 2. Set search path to lifeloop_test
-    await sql.unsafe(`SET search_path TO lifeloop_test, public;`);
 
     // 3. Create tables in lifeloop_test
     await sql.unsafe(`

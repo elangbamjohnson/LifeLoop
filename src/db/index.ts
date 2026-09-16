@@ -12,12 +12,20 @@ if (!connectionString) {
   throw new Error("FATAL: DATABASE_URL environment variable is missing");
 }
 
-if (isTest && !process.env.TEST_DATABASE_URL) {
-  // Use unpooled direct Neon connection with isolated lifeloop_test search_path
+if (isTest) {
+  if (!process.env.TEST_DATABASE_URL) {
+    // Use unpooled direct Neon connection with isolated lifeloop_test search_path
+    const base = connectionString.replace("-pooler", "");
+    connectionString = base.includes("?") 
+      ? `${base}&options=-c%20search_path%3Dlifeloop_test%2Cpublic` 
+      : `${base}?options=-c%20search_path%3Dlifeloop_test%2Cpublic`;
+  }
+} else {
+  // Use unpooled direct Neon connection with strictly enforced public schema
   const base = connectionString.replace("-pooler", "");
   connectionString = base.includes("?") 
-    ? `${base}&options=-c%20search_path%3Dlifeloop_test%2Cpublic` 
-    : `${base}?options=-c%20search_path%3Dlifeloop_test%2Cpublic`;
+    ? `${base}&options=-c%20search_path%3Dpublic` 
+    : `${base}?options=-c%20search_path%3Dpublic`;
 }
 
 const client = postgres(connectionString, {

@@ -6,6 +6,7 @@ interface AuthContextType {
   loading: boolean;
   setUser: (user: User | null) => void;
   checkAuth: () => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -30,12 +31,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const logout = async () => {
+    try {
+      await fetch("/api/v1/auth/logout", { method: "POST" });
+    } catch (e) {
+      console.error("Logout failed", e);
+    } finally {
+      setUser(null);
+    }
+  };
+
   useEffect(() => {
     checkAuth();
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, setUser, checkAuth }}>
+    <AuthContext.Provider value={{ user, loading, setUser, checkAuth, logout }}>
       {children}
     </AuthContext.Provider>
   );
