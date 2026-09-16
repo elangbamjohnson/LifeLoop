@@ -32,6 +32,23 @@ relationsRouter.get("/:itemId", requireAuth, async (req: AuthenticatedRequest, r
 relationsRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { sourceItemId, targetItemId, relationshipType, metadata } = req.body;
+    const relType = relationshipType || "related_to";
+
+    const existing = await db
+      .select()
+      .from(itemRelations)
+      .where(
+        and(
+          eq(itemRelations.sourceItemId, sourceItemId),
+          eq(itemRelations.targetItemId, targetItemId),
+          eq(itemRelations.relationshipType, relType)
+        )
+      )
+      .limit(1);
+
+    if (existing.length > 0) {
+      return res.json(existing[0]);
+    }
 
     const [created] = await db
       .insert(itemRelations)
@@ -39,7 +56,7 @@ relationsRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res, ne
         userId: req.userId!,
         sourceItemId,
         targetItemId,
-        relationshipType: relationshipType || "related_to",
+        relationshipType: relType,
         status: "active",
         metadata: metadata || {},
       })

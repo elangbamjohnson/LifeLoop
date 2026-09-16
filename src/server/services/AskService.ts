@@ -53,7 +53,7 @@ export class AskService {
        .map(s => s.item);
 
     // 3. LLM Reasoning
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.NODE_ENV !== "test" ? process.env.GEMINI_API_KEY : undefined;
     if (!apiKey) {
        return this.mockAsk(question, relevantRecords);
     }
@@ -82,7 +82,7 @@ User Question: ${question}
 
     try {
       const response = await ai.models.generateContent({
-         model: "gemini-2.5-flash",
+         model: "gemini-3.5-flash-lite",
          contents: prompt,
       });
       

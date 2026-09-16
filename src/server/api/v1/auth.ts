@@ -121,7 +121,13 @@ authRouter.get("/me", requireAuth, async (req: AuthenticatedRequest, res, next) 
   try {
     const [user] = await db.select({ id: users.id, email: users.email }).from(users).where(eq(users.id, req.userId!)).limit(1);
     if (!user) {
-      return res.status(404).json({ error: "User not found" });
+      const isSecure = process.env.NODE_ENV === "production" || req.secure || req.headers["x-forwarded-proto"] === "https";
+      res.clearCookie("session", {
+        httpOnly: true,
+        secure: isSecure,
+        sameSite: isSecure ? "none" : "lax",
+      });
+      return res.status(401).json({ error: "User not found" });
     }
     res.json({ user });
   } catch (error) {

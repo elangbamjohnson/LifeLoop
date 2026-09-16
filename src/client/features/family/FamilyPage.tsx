@@ -359,9 +359,11 @@ export function FamilyPage() {
                           </div>
                           <button
                             onClick={() => handleUnshare(si.id)}
-                            className="p-1.5 rounded-lg text-[#A8A29E] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors opacity-0 group-hover:opacity-100"
+                            title="Unshare this item with family"
+                            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-900/50 border border-red-200 dark:border-red-900/60 transition-colors shrink-0"
                           >
-                            <Trash2 size={14} />
+                            <Trash2 size={12} />
+                            <span>Unshare</span>
                           </button>
                         </div>
                       ))}

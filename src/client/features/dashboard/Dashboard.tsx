@@ -19,7 +19,8 @@ import {
   Smartphone,
   Bot,
   Network,
-  Users
+  Users,
+  LogOut
 } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 import { CaptureDialog } from "./CaptureDialog";
@@ -43,7 +44,7 @@ interface Capture {
 }
 
 export function Dashboard() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<"priority" | "timeline" | "captures" | "ask" | "graph" | "family">("priority");
   const [familyUnreadCount, setFamilyUnreadCount] = useState(0);
   const [activeEntity, setActiveEntity] = useState<TimelineItem | null>(null);
@@ -298,6 +299,30 @@ export function Dashboard() {
             >
               <Settings className="w-5 h-5" />
             </button>
+
+            {/* Profile badge & Log Out */}
+            {user && (
+              <div className="flex items-center gap-1.5 pl-2 border-l border-stone-300 dark:border-stone-700">
+                <div 
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-medium border border-stone-200 dark:border-stone-700 max-w-[170px]"
+                  title={`Logged in as ${user.email}`}
+                >
+                  <div className="w-4 h-4 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center text-[10px] font-bold uppercase shrink-0">
+                    {user.email ? user.email[0] : "U"}
+                  </div>
+                  <span className="truncate">{user.email}</span>
+                </div>
+
+                <button
+                  id="logout-btn"
+                  onClick={logout}
+                  className="p-1.5 text-[#78716C] hover:text-red-600 dark:hover:text-red-400 rounded-full hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                  title="Log Out"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -523,35 +548,16 @@ export function Dashboard() {
               )}
             </section>
 
-            {/* 4. WAITING FOR PLACEHOLDER */}
-            <section id="section-waiting-for" className="space-y-3">
-              <div className="flex items-center gap-2 text-purple-700 dark:text-purple-400">
-                <Hourglass className="w-4 h-4" />
-                <h2 className="text-xs font-semibold uppercase tracking-wider">
-                  Waiting For ({timeline.waitingFor.length})
-                </h2>
-              </div>
-
-              {timeline.waitingFor.length === 0 ? (
-                <div className="py-5 px-4 bg-white/50 dark:bg-[#23201E]/50 rounded-2xl border border-[#E7E5E4] dark:border-[#383330] text-xs text-[#78716C] dark:text-[#A8A29E] flex items-center justify-between">
-                  <span>No pending external replies or waiting-on items.</span>
-                  <button
-                    onClick={() => {
-                      setEditingItem({
-                        id: crypto.randomUUID(),
-                        title: "Waiting on reply",
-                        itemType: "waiting_for",
-                        status: "active",
-                        createdAt: new Date().toISOString(),
-                        metadata: { waitingFor: "Colleague / Company" },
-                      });
-                    }}
-                    className="text-xs text-purple-600 dark:text-purple-400 hover:underline font-medium"
-                  >
-                    + Add waiting for
-                  </button>
+            {/* 4. WAITING FOR SECTION */}
+            {timeline.waitingFor.length > 0 && (
+              <section id="section-waiting-for" className="space-y-3">
+                <div className="flex items-center gap-2 text-purple-700 dark:text-purple-400">
+                  <Hourglass className="w-4 h-4" />
+                  <h2 className="text-xs font-semibold uppercase tracking-wider">
+                    Waiting For ({timeline.waitingFor.length})
+                  </h2>
                 </div>
-              ) : (
+
                 <div className="space-y-2.5">
                   {timeline.waitingFor.map((item) => (
                     <ItemCard
@@ -564,8 +570,8 @@ export function Dashboard() {
                     />
                   ))}
                 </div>
-              )}
-            </section>
+              </section>
+            )}
           </div>
         )}
 

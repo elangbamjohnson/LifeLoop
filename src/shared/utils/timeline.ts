@@ -121,25 +121,25 @@ export function groupItemsIntoTimeline(
     const badge = getItemBadge(rawItem, referenceDate);
     const item = { ...rawItem, badgeText: badge.text, badgeVariant: badge.variant };
 
-    // 1. Waiting for candidate
+    // 1. If completed -> goes to past / completed history
+    if (item.status === "completed") {
+      result.past.push(item);
+      continue;
+    }
+
+    // 2. Active / Pending Waiting-For candidate
     if (item.itemType === "waiting_for" || item.metadata?.isWaitingFor === true || item.metadata?.waitingFor) {
       result.waitingFor.push(item);
       continue;
     }
 
-    // 2. Needs attention (unreviewed AI, overdue active items)
+    // 3. Needs attention (unreviewed AI)
     if (item.status === "pending_review") {
       result.needsAttention.push(item);
       continue;
     }
 
     const target = getItemTargetDate(item);
-
-    // If completed and not overdue
-    if (item.status === "completed") {
-      result.past.push(item);
-      continue;
-    }
 
     if (!target) {
       // Items with no due date go into upcoming
