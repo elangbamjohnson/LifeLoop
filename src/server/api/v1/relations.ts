@@ -82,3 +82,25 @@ relationsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res
     next(error);
   }
 });
+
+// Delete relationship
+relationsRouter.delete("/:id", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const [existing] = await db
+      .select()
+      .from(itemRelations)
+      .where(and(eq(itemRelations.id, id), eq(itemRelations.userId, req.userId!)))
+      .limit(1);
+
+    if (!existing) {
+      return res.status(404).json({ error: "Relation not found" });
+    }
+
+    await db.delete(itemRelations).where(eq(itemRelations.id, id));
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});

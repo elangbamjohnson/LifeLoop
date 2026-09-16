@@ -9,10 +9,9 @@ import { users, captures } from '../src/db/schema';
 import { eq } from 'drizzle-orm';
 import path from 'path';
 
-const app = express();
-app.use(express.json());
-app.use(cookieParser());
-app.use('/api/v1/captures', capturesRouter);
+import { createTestApp } from './setup';
+
+const app = createTestApp('/api/v1/captures', capturesRouter);
 
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_development_only";
 
@@ -100,7 +99,7 @@ describe('Capture API - Phase 1', () => {
       .set('Cookie', authCookie)
       .send({ type: 'text', rawPayload: 'To be deleted' });
     
-    const captureId = res.body.capture.id;
+    const captureId = res.body.capture?.id;
 
     const delRes = await request(app)
       .delete(`/api/v1/captures/${captureId}`)

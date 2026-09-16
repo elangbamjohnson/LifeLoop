@@ -18,37 +18,43 @@ const ROLE_RANK: Record<FamilyRole, number> = {
  * family (`:id` param) with at least the given minimum role.
  * Attaches `req.familyMember` for downstream handlers.
  */
+import { validate as uuidValidate } from "uuid";
+
 export function requireFamilyRole(minRole: FamilyRole) {
   return async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    const familyId = req.params.id;
-    if (!familyId) {
-      return res.status(400).json({ error: "Family ID required" });
-    }
+    try {
+      const familyId = req.params.id;
+      if (!familyId || !uuidValidate(familyId)) {
+        return res.status(400).json({ error: "Valid Family ID is required" });
+      }
 
-    const [member] = await db
-      .select()
-      .from(familyMembers)
-      .where(
-        and(
-          eq(familyMembers.familyId, familyId),
-          eq(familyMembers.userId, req.userId!),
-          eq(familyMembers.status, "accepted")
+      const [member] = await db
+        .select()
+        .from(familyMembers)
+        .where(
+          and(
+            eq(familyMembers.familyId, familyId),
+            eq(familyMembers.userId, req.userId!),
+            eq(familyMembers.status, "accepted")
+          )
         )
-      )
-      .limit(1);
+        .limit(1);
 
-    if (!member) {
-      return res.status(403).json({ error: "You are not a member of this family" });
+      if (!member) {
+        return res.status(403).json({ error: "You are not a member of this family" });
+      }
+
+      const userRank = ROLE_RANK[member.role as FamilyRole] ?? 0;
+      const requiredRank = ROLE_RANK[minRole];
+
+      if (userRank < requiredRank) {
+        return res.status(403).json({ error: "Insufficient permissions" });
+      }
+
+      (req as any).familyMember = member;
+      next();
+    } catch (err) {
+      next(err);
     }
-
-    const userRank = ROLE_RANK[member.role as FamilyRole] ?? 0;
-    const requiredRank = ROLE_RANK[minRole];
-
-    if (userRank < requiredRank) {
-      return res.status(403).json({ error: "Insufficient permissions" });
-    }
-
-    (req as any).familyMember = member;
-    next();
   };
 }
