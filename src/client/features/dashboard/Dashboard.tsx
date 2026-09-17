@@ -49,6 +49,7 @@ export function Dashboard() {
   const [familyUnreadCount, setFamilyUnreadCount] = useState(0);
   const [activeEntity, setActiveEntity] = useState<TimelineItem | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [showFamilyBanner, setShowFamilyBanner] = useState(true);
 
   // Modals
   const [isCaptureOpen, setIsCaptureOpen] = useState(false);
@@ -69,9 +70,10 @@ export function Dashboard() {
 
   const fetchData = async () => {
     try {
-      const [capRes, itemRes] = await Promise.all([
+      const [capRes, itemRes, notifRes] = await Promise.all([
         fetch("/api/v1/captures"),
         fetch("/api/v1/items"),
+        fetch("/api/v1/families/notifications").catch(() => null),
       ]);
 
       if (capRes.ok) {
@@ -88,6 +90,11 @@ export function Dashboard() {
           createdAt: new Date(i.createdAt).toISOString(),
         }));
         setItems(rawItems);
+      }
+      if (notifRes && notifRes.ok) {
+        const notifData = await notifRes.json();
+        const unread = (notifData.notifications || []).filter((n: any) => !n.isRead).length;
+        setFamilyUnreadCount(unread);
       }
     } catch (e) {
       console.error("Failed to load dashboard data:", e);
@@ -259,7 +266,7 @@ export function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FDFBF7] dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] pb-32 transition-colors">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden min-w-0 bg-[#FDFBF7] dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] pb-32 transition-colors">
       {/* Floating Toast notification */}
       {toastMessage && (
         <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] px-4 py-2.5 rounded-full text-xs font-medium shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3">
@@ -269,83 +276,73 @@ export function Dashboard() {
       )}
 
       {/* Header */}
-      <header className="px-6 pt-10 pb-4 max-w-4xl mx-auto flex flex-col gap-5 sticky top-0 bg-[#FDFBF7]/90 dark:bg-[#1C1917]/90 backdrop-blur-md z-20 border-b border-[#E7E5E4]/60 dark:border-[#2E2A27]/60">
+      <header className="px-4 sm:px-6 pt-10 pb-4 w-full max-w-4xl mx-auto flex flex-col gap-5 sticky top-0 bg-[#FDFBF7]/95 dark:bg-[#1C1917]/95 backdrop-blur-md z-20 border-b border-[#E7E5E4]/60 dark:border-[#2E2A27]/60 overflow-x-hidden min-w-0">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-serif tracking-tight text-[#1C1917] dark:text-[#FDFBF7]">
+            <h1 className="text-xl sm:text-2xl font-normal font-serif tracking-tight text-[#1C1917] dark:text-[#FDFBF7]">
               LifeLoop
             </h1>
-            <p className="text-xs text-[#78716C] dark:text-[#A8A29E] mt-0.5">
-              {new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
+            <p className="text-[11px] sm:text-xs text-[#78716C] dark:text-[#A8A29E] mt-0.5">
+              {new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              id="install-iphone-btn"
-              onClick={() => setIsInstallOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1C1917] dark:bg-[#FDFBF7] text-[#FDFBF7] dark:text-[#1C1917] rounded-full text-xs font-medium hover:opacity-90 shadow-sm transition-all"
-              title="Install LifeLoop on iPhone / Real Device"
-            >
-              <Smartphone className="w-3.5 h-3.5 text-amber-400 dark:text-amber-600" />
-              <span>Install on iPhone</span>
-            </button>
-
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 min-w-0">
             <button
               id="reminder-preferences-btn"
               onClick={() => setIsPreferencesOpen(true)}
-              className="p-2 text-[#78716C] hover:text-[#1C1917] dark:hover:text-white rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+              className="p-2 text-[#78716C] hover:text-[#1C1917] dark:hover:text-white rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors shrink-0"
               title="Reminder Preferences"
             >
-              <Settings className="w-5 h-5" />
+              <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
 
             {/* Profile badge & Log Out */}
             {user && (
-              <div className="flex items-center gap-1.5 pl-2 border-l border-stone-300 dark:border-stone-700">
-                <div 
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-medium border border-stone-200 dark:border-stone-700 max-w-[170px]"
-                  title={`Logged in as ${user.email}`}
-                >
-                  <div className="w-4 h-4 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center text-[10px] font-bold uppercase shrink-0">
-                    {user.email ? user.email[0] : "U"}
-                  </div>
-                  <span className="truncate">{user.email}</span>
+              <div 
+                className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-full bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-medium border border-stone-200 dark:border-stone-700 max-w-[100px] xs:max-w-[130px] sm:max-w-[170px] shrink-0"
+                title={`Logged in as ${user.email}`}
+              >
+                <div className="w-4 h-4 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center text-[10px] font-bold uppercase shrink-0">
+                  {user.email ? user.email[0] : "U"}
                 </div>
-
-                <button
-                  id="logout-btn"
-                  onClick={logout}
-                  className="p-1.5 text-[#78716C] hover:text-red-600 dark:hover:text-red-400 rounded-full hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
-                  title="Log Out"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
+                <span className="truncate text-[11px] sm:text-xs">{user.email}</span>
               </div>
+            )}
+
+            {user && (
+              <button
+                id="logout-btn"
+                onClick={logout}
+                className="flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:py-1.5 text-xs text-[#78716C] hover:text-red-600 dark:text-[#A8A29E] dark:hover:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 border border-stone-200 dark:border-stone-700 sm:border-transparent transition-colors shrink-0 font-medium"
+                title="Log Out"
+                aria-label="Log Out"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="text-[11px] hidden sm:inline">Log out</span>
+              </button>
             )}
           </div>
         </div>
 
         {/* Search Bar & View Navigation */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 min-w-0 w-full">
           {/* Tabs */}
           <div 
-            className="flex items-center bg-stone-200/70 dark:bg-stone-800/70 p-1 rounded-xl text-xs font-medium text-stone-600 dark:text-stone-300 overflow-x-auto w-full sm:w-auto"
-            style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}
+            className="flex items-center bg-stone-200/70 dark:bg-stone-800/70 p-1 rounded-xl text-xs font-medium text-stone-600 dark:text-stone-300 overflow-x-auto w-full sm:w-auto min-w-0 no-scrollbar"
           >
-            <style>{`.hide-scroll::-webkit-scrollbar { display: none; }`}</style>
-            <div className="flex items-center gap-1 hide-scroll min-w-max">
+            <div className="flex items-center gap-1 no-scrollbar min-w-max">
               <button
                 id="tab-priority"
                 onClick={() => setActiveTab("priority")}
                 className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
                   activeTab === "priority"
                     ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
-                    : "hover:text-[#1C1917] dark:hover:text-white"
+                    : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white"
                 }`}
               >
                 <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                Home
+                Priority
               </button>
               <button
                 id="tab-timeline"
@@ -353,10 +350,10 @@ export function Dashboard() {
                 className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
                   activeTab === "timeline"
                     ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
-                    : "hover:text-[#1C1917] dark:hover:text-white"
+                    : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white"
                 }`}
               >
-                <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                <Clock className="w-3.5 h-3.5 text-blue-500" />
                 Timeline
               </button>
               <button
@@ -365,7 +362,7 @@ export function Dashboard() {
                 className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
                   activeTab === "captures"
                     ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
-                    : "hover:text-[#1C1917] dark:hover:text-white"
+                    : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white"
                 }`}
               >
                 <Inbox className="w-3.5 h-3.5 text-emerald-500" />
@@ -381,12 +378,12 @@ export function Dashboard() {
                 onClick={() => { setActiveTab("ask"); setActiveEntity(null); }}
                 className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
                   activeTab === "ask"
-                    ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm font-semibold"
-                    : "hover:text-indigo-600 dark:hover:text-indigo-400"
+                    ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
+                    : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white"
                 }`}
               >
-                <Bot className={`w-3.5 h-3.5 ${activeTab === 'ask' ? 'text-white' : 'text-indigo-500'}`} />
-                Ask AI
+                <Bot className="w-3.5 h-3.5 text-indigo-500" />
+                Ask
               </button>
               <button
                 id="tab-graph"
@@ -394,11 +391,11 @@ export function Dashboard() {
                 className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
                   activeTab === "graph"
                     ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
-                    : "hover:text-[#1C1917] dark:hover:text-white"
+                    : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white"
                 }`}
               >
                 <Network className="w-3.5 h-3.5 text-purple-500" />
-                Entities
+                Graph
               </button>
               <button
                 id="tab-family"
@@ -406,7 +403,7 @@ export function Dashboard() {
                 className={`relative px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
                   activeTab === "family"
                     ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
-                    : "hover:text-[#1C1917] dark:hover:text-white"
+                    : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white"
                 }`}
               >
                 <Users className="w-3.5 h-3.5 text-emerald-500" />
@@ -421,7 +418,7 @@ export function Dashboard() {
           </div>
 
           {/* Search Input */}
-          <div className="relative flex-1 sm:max-w-xs">
+          <div className="relative flex-1 sm:max-w-xs min-w-0 w-full">
             <Search className="w-4 h-4 text-[#A8A29E] absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               id="search-input"
@@ -429,14 +426,14 @@ export function Dashboard() {
               placeholder="Search bills, renewals, tasks..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 rounded-xl text-xs bg-white dark:bg-[#23201E] border border-[#E7E5E4] dark:border-[#383330] text-[#1C1917] dark:text-[#FDFBF7] focus:outline-none focus:ring-1 focus:ring-[#1C1917] dark:focus:ring-white transition-all"
+              className="w-full pl-9 pr-4 py-1.5 rounded-xl text-xs bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] text-[#1C1917] dark:text-[#FDFBF7] placeholder:text-[#A8A29E] focus:outline-none focus:ring-1 focus:ring-amber-500 transition-all"
             />
           </div>
         </div>
       </header>
 
       {/* Main Content Area */}
-      <main className="px-6 max-w-4xl mx-auto mt-6 space-y-8">
+      <main className="px-4 sm:px-6 max-w-4xl mx-auto mt-6 space-y-8 w-full max-w-full overflow-x-hidden min-w-0">
         {loading && (
           <div className="flex items-center justify-center py-20 text-[#A8A29E]">
             <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading LifeLoop...
@@ -461,6 +458,32 @@ export function Dashboard() {
         {/* ---------------------------------------------------- */}
         {!loading && activeTab === "priority" && (
           <div className="space-y-8">
+            {/* Family Sharing Banner (Conditional) */}
+            {familyUnreadCount > 0 && showFamilyBanner && (
+              <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-xl p-3.5 flex items-center justify-between gap-3 text-xs text-amber-900 dark:text-amber-200 animate-in fade-in slide-in-from-top-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Users className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span className="truncate">
+                    <strong>Family Sharing:</strong> You have {familyUnreadCount} unread family notification{familyUnreadCount > 1 ? "s" : ""}.
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => { setActiveTab("family"); setActiveEntity(null); }}
+                    className="font-semibold text-amber-700 dark:text-amber-300 hover:underline"
+                  >
+                    View Family &rarr;
+                  </button>
+                  <button
+                    onClick={() => setShowFamilyBanner(false)}
+                    className="p-1 text-amber-600/70 hover:text-amber-900 dark:hover:text-amber-100 rounded-lg hover:bg-amber-100/60 dark:hover:bg-amber-900/40 transition-colors"
+                    title="Dismiss"
+                  >
+                    &times;
+                  </button>
+                </div>
+              </div>
+            )}
             {/* 1. NEEDS ATTENTION (Urgent, Overdue, AI Review) */}
             {timeline.needsAttention.length > 0 && (
               <section id="section-needs-attention" className="space-y-3">
@@ -820,14 +843,15 @@ export function Dashboard() {
       </main>
 
       {/* 5. CAPTURE BUTTON (Floating Action Button) */}
-      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40">
+      <div className="fixed bottom-6 right-6 z-40">
         <button
           id="global-capture-btn"
           onClick={() => setIsCaptureOpen(true)}
-          className="flex items-center gap-2 bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] px-7 py-4 rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-150 border border-black/10 dark:border-white/10"
+          className="flex items-center gap-2 bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] p-3.5 sm:px-5 sm:py-3.5 rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-150 border border-black/10 dark:border-white/10 text-xs font-semibold"
+          title="Quick Capture"
         >
           <Plus className="w-5 h-5 stroke-[2.5]" />
-          <span className="font-medium tracking-wide text-sm">Capture</span>
+          <span className="hidden sm:inline font-semibold">Capture</span>
         </button>
       </div>
 

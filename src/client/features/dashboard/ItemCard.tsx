@@ -95,13 +95,13 @@ export const ItemCard: React.FC<ItemCardProps> = ({
     return (
       <div
         id={`item-card-${item.id}`}
-        className={`group relative bg-white dark:bg-[#23201E] border ${
+        className={`group relative bg-white dark:bg-[#292524] border ${
           isCompleted
-            ? "border-[#E7E5E4] dark:border-[#383330] opacity-60"
+            ? "border-[#E7E5E4] dark:border-[#44403C] opacity-60"
             : isOverdue
             ? "border-amber-300 dark:border-amber-700/80 bg-amber-50/20 dark:bg-amber-950/10"
-            : "border-[#E7E5E4] dark:border-[#383330] hover:border-[#D6D3D1] dark:hover:border-[#57534E]"
-        } rounded-2xl p-4 transition-all duration-150 shadow-sm`}
+            : "border-[#E7E5E4] dark:border-[#44403C] hover:border-[#D6D3D1] dark:hover:border-[#57534E]"
+        } rounded-xl p-4 transition-all duration-150 shadow-sm hover:shadow-md`}
       >
         <div className="flex flex-col gap-3">
           <div className="flex justify-between items-start">
@@ -127,7 +127,7 @@ export const ItemCard: React.FC<ItemCardProps> = ({
               </div>
             </div>
             
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                <button onClick={() => onEdit(item)} className="p-1.5 text-[#78716C] hover:text-[#1C1917] dark:hover:text-white rounded-lg hover:bg-black/5 dark:hover:bg-white/5" title="Edit"><Edit3 className="w-4 h-4" /></button>
                <button onClick={() => onDelete(item.id)} className="p-1.5 text-[#78716C] hover:text-red-600 rounded-lg hover:bg-black/5 dark:hover:bg-white/5" title="Delete"><Trash2 className="w-4 h-4" /></button>
             </div>
@@ -178,13 +178,13 @@ export const ItemCard: React.FC<ItemCardProps> = ({
   return (
     <div
       id={`item-card-${item.id}`}
-      className={`group relative bg-white dark:bg-[#23201E] border ${
+      className={`group relative bg-white dark:bg-[#292524] border ${
         isPendingReview
           ? "border-amber-300 dark:border-amber-700/80 bg-amber-50/30 dark:bg-amber-950/10"
           : isCompleted
-          ? "border-[#E7E5E4] dark:border-[#383330] opacity-60"
-          : "border-[#E7E5E4] dark:border-[#383330] hover:border-[#D6D3D1] dark:hover:border-[#57534E]"
-      } rounded-2xl p-4 transition-all duration-150 shadow-sm`}
+          ? "border-[#E7E5E4] dark:border-[#44403C] opacity-60"
+          : "border-[#E7E5E4] dark:border-[#44403C] hover:border-[#D6D3D1] dark:hover:border-[#57534E]"
+      } rounded-xl p-4 transition-all duration-150 shadow-sm hover:shadow-md`}
     >
       <div className="flex items-start gap-3.5">
         {/* Checkbox button */}
@@ -299,7 +299,7 @@ export const ItemCard: React.FC<ItemCardProps> = ({
         </div>
 
         {/* Actions bar */}
-        <div className="flex items-center gap-1 self-start sm:self-center ml-2">
+        <div className="flex items-center gap-1 self-start sm:self-center ml-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
           {isPendingReview ? (
             <div className="flex items-center gap-1.5">
               <button
