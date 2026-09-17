@@ -269,32 +269,23 @@ export function Dashboard() {
       )}
 
       {/* Header */}
-      <header className="px-6 pt-10 pb-4 max-w-4xl mx-auto flex flex-col gap-5 sticky top-0 bg-[#FDFBF7]/90 dark:bg-[#1C1917]/90 backdrop-blur-md z-20 border-b border-[#E7E5E4]/60 dark:border-[#2E2A27]/60">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-serif tracking-tight text-[#1C1917] dark:text-[#FDFBF7]">
+      <header className="px-4 sm:px-6 pt-6 sm:pt-10 pb-4 max-w-4xl mx-auto flex flex-col gap-3.5 sticky top-0 bg-[#FDFBF7]/95 dark:bg-[#1C1917]/95 backdrop-blur-md z-20 border-b border-[#E7E5E4]/60 dark:border-[#2E2A27]/60">
+        {/* Row 1: Brand & User Profile Cluster */}
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <div className="shrink-0">
+            <h1 className="text-xl sm:text-2xl font-normal font-serif tracking-tight text-[#1C1917] dark:text-[#FDFBF7]">
               LifeLoop
             </h1>
-            <p className="text-xs text-[#78716C] dark:text-[#A8A29E] mt-0.5">
-              {new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
+            <p className="text-[11px] sm:text-xs text-[#78716C] dark:text-[#A8A29E] mt-0.5">
+              {new Date().toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short" }).replace(",", "")}
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              id="install-iphone-btn"
-              onClick={() => setIsInstallOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1C1917] dark:bg-[#FDFBF7] text-[#FDFBF7] dark:text-[#1C1917] rounded-full text-xs font-medium hover:opacity-90 shadow-sm transition-all"
-              title="Install LifeLoop on iPhone / Real Device"
-            >
-              <Smartphone className="w-3.5 h-3.5 text-amber-400 dark:text-amber-600" />
-              <span>Install on iPhone</span>
-            </button>
-
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 min-w-0">
             <button
               id="reminder-preferences-btn"
               onClick={() => setIsPreferencesOpen(true)}
-              className="p-2 text-[#78716C] hover:text-[#1C1917] dark:hover:text-white rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+              className="p-1.5 sm:p-2 text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-white rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors shrink-0"
               title="Reminder Preferences"
             >
               <Settings className="w-5 h-5" />
@@ -302,141 +293,135 @@ export function Dashboard() {
 
             {/* Profile badge & Log Out */}
             {user && (
-              <div className="flex items-center gap-1.5 pl-2 border-l border-stone-300 dark:border-stone-700">
-                <div 
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-medium border border-stone-200 dark:border-stone-700 max-w-[170px]"
-                  title={`Logged in as ${user.email}`}
-                >
-                  <div className="w-4 h-4 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center text-[10px] font-bold uppercase shrink-0">
-                    {user.email ? user.email[0] : "U"}
-                  </div>
-                  <span className="truncate">{user.email}</span>
+              <div 
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-stone-100 dark:bg-stone-800/80 text-stone-700 dark:text-stone-300 text-xs font-medium border border-stone-200 dark:border-stone-700/80 max-w-[120px] xs:max-w-[150px] sm:max-w-[180px] shrink-1 min-w-0"
+                title={`Logged in as ${user.email}`}
+              >
+                <div className="w-4 h-4 rounded-full bg-amber-500 text-stone-950 flex items-center justify-center text-[10px] font-bold uppercase shrink-0">
+                  {user.email ? user.email[0] : "U"}
                 </div>
-
-                <button
-                  id="logout-btn"
-                  onClick={logout}
-                  className="p-1.5 text-[#78716C] hover:text-red-600 dark:hover:text-red-400 rounded-full hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
-                  title="Log Out"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
+                <span className="truncate text-[11px] sm:text-xs">{user.email}</span>
               </div>
+            )}
+
+            {user && (
+              <button
+                id="logout-btn"
+                onClick={logout}
+                className="p-1.5 text-[#78716C] hover:text-red-600 dark:text-stone-400 dark:hover:text-white rounded-lg border border-stone-200 dark:border-stone-700/80 hover:bg-red-50 dark:hover:bg-white/5 transition-colors shrink-0 flex items-center justify-center"
+                title="Log Out"
+                aria-label="Log Out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
             )}
           </div>
         </div>
 
-        {/* Search Bar & View Navigation */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          {/* Tabs */}
-          <div 
-            className="flex items-center bg-stone-200/70 dark:bg-stone-800/70 p-1 rounded-xl text-xs font-medium text-stone-600 dark:text-stone-300 overflow-x-auto w-full sm:w-auto"
-            style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}
-          >
-            <style>{`.hide-scroll::-webkit-scrollbar { display: none; }`}</style>
-            <div className="flex items-center gap-1 hide-scroll min-w-max">
-              <button
-                id="tab-priority"
-                onClick={() => setActiveTab("priority")}
-                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeTab === "priority"
-                    ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
-                    : "hover:text-[#1C1917] dark:hover:text-white"
-                }`}
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                Home
-              </button>
-              <button
-                id="tab-timeline"
-                onClick={() => setActiveTab("timeline")}
-                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeTab === "timeline"
-                    ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
-                    : "hover:text-[#1C1917] dark:hover:text-white"
-                }`}
-              >
-                <Calendar className="w-3.5 h-3.5 text-blue-500" />
-                Timeline
-              </button>
-              <button
-                id="tab-captures"
-                onClick={() => setActiveTab("captures")}
-                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeTab === "captures"
-                    ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
-                    : "hover:text-[#1C1917] dark:hover:text-white"
-                }`}
-              >
-                <Inbox className="w-3.5 h-3.5 text-emerald-500" />
-                Inbox
-                {captures.length > 0 && (
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-stone-300 dark:bg-stone-700">
-                    {captures.length}
-                  </span>
-                )}
-              </button>
-              <button
-                id="tab-ask"
-                onClick={() => { setActiveTab("ask"); setActiveEntity(null); }}
-                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeTab === "ask"
-                    ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm font-semibold"
-                    : "hover:text-indigo-600 dark:hover:text-indigo-400"
-                }`}
-              >
-                <Bot className={`w-3.5 h-3.5 ${activeTab === 'ask' ? 'text-white' : 'text-indigo-500'}`} />
-                Ask AI
-              </button>
-              <button
-                id="tab-graph"
-                onClick={() => { setActiveTab("graph"); setActiveEntity(null); }}
-                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeTab === "graph"
-                    ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
-                    : "hover:text-[#1C1917] dark:hover:text-white"
-                }`}
-              >
-                <Network className="w-3.5 h-3.5 text-purple-500" />
-                Entities
-              </button>
-              <button
-                id="tab-family"
-                onClick={() => { setActiveTab("family"); setActiveEntity(null); }}
-                className={`relative px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeTab === "family"
-                    ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
-                    : "hover:text-[#1C1917] dark:hover:text-white"
-                }`}
-              >
-                <Users className="w-3.5 h-3.5 text-emerald-500" />
-                Family
-                {familyUnreadCount > 0 && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-                    {familyUnreadCount > 9 ? "9+" : familyUnreadCount}
-                  </span>
-                )}
-              </button>
-            </div>
+        {/* Row 2: Segmented Filter Tabs */}
+        <div className="w-full overflow-x-auto no-scrollbar">
+          <div className="flex items-center gap-1 bg-stone-200/70 dark:bg-stone-800/70 p-1 rounded-xl text-xs font-medium text-stone-600 dark:text-stone-300 min-w-max">
+            <button
+              id="tab-priority"
+              onClick={() => setActiveTab("priority")}
+              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                activeTab === "priority"
+                  ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
+                  : "hover:text-[#1C1917] dark:hover:text-white"
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              Home
+            </button>
+            <button
+              id="tab-timeline"
+              onClick={() => setActiveTab("timeline")}
+              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                activeTab === "timeline"
+                  ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
+                  : "hover:text-[#1C1917] dark:hover:text-white"
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5 text-blue-500" />
+              Timeline
+            </button>
+            <button
+              id="tab-captures"
+              onClick={() => setActiveTab("captures")}
+              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                activeTab === "captures"
+                  ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
+                  : "hover:text-[#1C1917] dark:hover:text-white"
+              }`}
+            >
+              <Inbox className="w-3.5 h-3.5 text-emerald-500" />
+              Inbox
+              {captures.length > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-stone-300 dark:bg-stone-700">
+                  {captures.length}
+                </span>
+              )}
+            </button>
+            <button
+              id="tab-ask"
+              onClick={() => { setActiveTab("ask"); setActiveEntity(null); }}
+              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                activeTab === "ask"
+                  ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
+                  : "hover:text-indigo-600 dark:hover:text-indigo-400"
+              }`}
+            >
+              <Bot className="w-3.5 h-3.5 text-indigo-500" />
+              Ask AI
+            </button>
+            <button
+              id="tab-graph"
+              onClick={() => { setActiveTab("graph"); setActiveEntity(null); }}
+              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                activeTab === "graph"
+                  ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
+                  : "hover:text-[#1C1917] dark:hover:text-white"
+              }`}
+            >
+              <Network className="w-3.5 h-3.5 text-purple-500" />
+              Entities
+            </button>
+            <button
+              id="tab-family"
+              onClick={() => { setActiveTab("family"); setActiveEntity(null); }}
+              className={`relative px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                activeTab === "family"
+                  ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
+                  : "hover:text-[#1C1917] dark:hover:text-white"
+              }`}
+            >
+              <Users className="w-3.5 h-3.5 text-emerald-500" />
+              Family
+              {familyUnreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                  {familyUnreadCount > 9 ? "9+" : familyUnreadCount}
+                </span>
+              )}
+            </button>
           </div>
+        </div>
 
-          {/* Search Input */}
-          <div className="relative flex-1 sm:max-w-xs">
-            <Search className="w-4 h-4 text-[#A8A29E] absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              id="search-input"
-              type="text"
-              placeholder="Search bills, renewals, tasks..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 rounded-xl text-xs bg-white dark:bg-[#23201E] border border-[#E7E5E4] dark:border-[#383330] text-[#1C1917] dark:text-[#FDFBF7] focus:outline-none focus:ring-1 focus:ring-[#1C1917] dark:focus:ring-white transition-all"
-            />
-          </div>
+        {/* Row 3: Search Bar relocated just below tabbar */}
+        <div className="relative w-full">
+          <Search className="w-4 h-4 text-[#A8A29E] absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            id="search-input"
+            type="text"
+            placeholder="Search bills, renewals, tasks..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 bg-transparent dark:bg-[#1C1917] border border-stone-300 dark:border-stone-700/80 rounded-full text-xs text-[#1C1917] dark:text-[#FDFBF7] placeholder:text-[#A8A29E] focus:outline-none focus:ring-1 focus:ring-stone-400 transition-all"
+          />
         </div>
       </header>
 
       {/* Main Content Area */}
-      <main className="px-6 max-w-4xl mx-auto mt-6 space-y-8">
+      <main className="px-4 sm:px-6 max-w-4xl mx-auto mt-6 space-y-6 sm:space-y-8">
         {loading && (
           <div className="flex items-center justify-center py-20 text-[#A8A29E]">
             <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading LifeLoop...
@@ -820,14 +805,15 @@ export function Dashboard() {
       </main>
 
       {/* 5. CAPTURE BUTTON (Floating Action Button) */}
-      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40">
+      <div className="fixed bottom-6 right-6 z-40">
         <button
           id="global-capture-btn"
           onClick={() => setIsCaptureOpen(true)}
-          className="flex items-center gap-2 bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] px-7 py-4 rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-150 border border-black/10 dark:border-white/10"
+          className="flex items-center gap-2 bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] p-3.5 sm:px-5 sm:py-3.5 rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-150 border border-black/10 dark:border-white/10 text-xs font-semibold"
+          title="Quick Capture"
         >
           <Plus className="w-5 h-5 stroke-[2.5]" />
-          <span className="font-medium tracking-wide text-sm">Capture</span>
+          <span className="hidden sm:inline font-semibold">Capture</span>
         </button>
       </div>
 
