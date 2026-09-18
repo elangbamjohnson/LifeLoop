@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   Plus, 
   Settings, 
@@ -20,7 +20,11 @@ import {
   Bot,
   Network,
   Users,
-  LogOut
+  LogOut,
+  X,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 import { CaptureDialog } from "./CaptureDialog";
@@ -47,20 +51,78 @@ export function Dashboard() {
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<"priority" | "timeline" | "captures" | "ask" | "graph" | "family">("priority");
   const [familyUnreadCount, setFamilyUnreadCount] = useState(0);
+  const [isFamilyBannerDismissed, setIsFamilyBannerDismissed] = useState(false);
   const [activeEntity, setActiveEntity] = useState<TimelineItem | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Modals
+  // Modals & Menus
   const [isCaptureOpen, setIsCaptureOpen] = useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
   const [isInstallOpen, setIsInstallOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<TimelineItem | null>(null);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close profile menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+        setIsProfileMenuOpen(false);
+      }
+    };
+    if (isProfileMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isProfileMenuOpen]);
 
   // Data
   const [captures, setCaptures] = useState<Capture[]>([]);
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Tab bar scroll affordance indicators
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const tabBarRef = useRef<HTMLDivElement>(null);
+
+  const checkTabBarScroll = () => {
+    if (tabBarRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = tabBarRef.current;
+      setCanScrollLeft(scrollLeft > 6);
+      setCanScrollRight(scrollWidth > clientWidth && scrollLeft < scrollWidth - clientWidth - 6);
+    }
+  };
+
+  useEffect(() => {
+    checkTabBarScroll();
+    // Re-check after layout paint and font render
+    const t1 = setTimeout(checkTabBarScroll, 50);
+    const t2 = setTimeout(checkTabBarScroll, 200);
+    const t3 = setTimeout(checkTabBarScroll, 600);
+    window.addEventListener("resize", checkTabBarScroll);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      window.removeEventListener("resize", checkTabBarScroll);
+    };
+  }, [captures.length, items.length]);
+
+  // Ensure active tab is smoothly visible into view
+  useEffect(() => {
+    if (tabBarRef.current) {
+      const activeEl = tabBarRef.current.querySelector<HTMLElement>(`#tab-${activeTab}`);
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: "smooth", inline: "nearest", block: "nearest" });
+      }
+      setTimeout(checkTabBarScroll, 350);
+    }
+  }, [activeTab]);
+
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -259,7 +321,7 @@ export function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FDFBF7] dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] pb-32 transition-colors">
+    <div className="min-h-screen bg-[#FDFBF7] dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] pb-32 transition-colors w-full max-w-full overflow-x-clip min-w-0">
       {/* Floating Toast notification */}
       {toastMessage && (
         <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] px-4 py-2.5 rounded-full text-xs font-medium shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3">
@@ -269,154 +331,218 @@ export function Dashboard() {
       )}
 
       {/* Header */}
-      <header className="px-4 sm:px-6 pt-6 sm:pt-10 pb-4 max-w-4xl mx-auto flex flex-col gap-3.5 sticky top-0 bg-[#FDFBF7]/95 dark:bg-[#1C1917]/95 backdrop-blur-md z-20 border-b border-[#E7E5E4]/60 dark:border-[#2E2A27]/60">
-        {/* Row 1: Brand & User Profile Cluster */}
-        <div className="flex items-center justify-between gap-2 min-w-0">
-          <div className="shrink-0">
-            <h1 className="text-xl sm:text-2xl font-normal font-serif tracking-tight text-[#1C1917] dark:text-[#FDFBF7]">
-              LifeLoop
-            </h1>
-            <p className="text-[11px] sm:text-xs text-[#78716C] dark:text-[#A8A29E] mt-0.5">
-              {new Date().toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short" }).replace(",", "")}
-            </p>
+      <header className="w-full sticky top-0 z-20 backdrop-blur-md bg-[#FDFBF7]/95 dark:bg-[#1C1917]/95 border-b border-[#E7E5E4]/60 dark:border-[#2E2A27]/60">
+        <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 pt-3.5 sm:pt-6 pb-3 sm:pb-4 flex flex-col gap-2.5 sm:gap-3.5">
+          {/* Row 1: Brand & User Profile Cluster */}
+          <div className="w-full flex items-center justify-between gap-2 min-w-0">
+            <div className="shrink min-w-0">
+              <h1 className="text-xl sm:text-2xl font-normal font-serif tracking-tight text-[#1C1917] dark:text-[#FDFBF7]">
+                LifeLoop
+              </h1>
+              <p className="text-[11px] sm:text-xs text-[#78716C] dark:text-[#A8A29E] mt-0.5">
+                {new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 justify-end min-w-0">
+              {/* Settings button adjusted just before the profile button */}
+              <button
+                id="reminder-preferences-btn"
+                onClick={() => setIsPreferencesOpen(true)}
+                className="p-1.5 sm:p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors shrink-0 text-[#78716C] dark:text-[#A8A29E]"
+                title="Reminder Preferences"
+              >
+                <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+
+              {/* Profile badge with dropdown popover showing Logout */}
+              {user && (
+                <div className="relative shrink min-w-0" ref={profileMenuRef}>
+                  <button
+                    id="user-profile-menu-btn"
+                    onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+                    className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-full bg-stone-100 dark:bg-stone-800 hover:bg-stone-200/80 dark:hover:bg-stone-700/80 border border-stone-200 dark:border-stone-700 text-xs font-medium max-w-[95px] sm:max-w-[160px] min-w-0 cursor-pointer transition-colors"
+                    title={`Account menu (${user.email})`}
+                    aria-expanded={isProfileMenuOpen}
+                    aria-haspopup="true"
+                  >
+                    <div className="w-4 h-4 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center text-[10px] font-bold uppercase shrink-0">
+                      {user.email ? user.email[0] : "U"}
+                    </div>
+                    <span className="truncate min-w-0 flex-1 text-[11px] sm:text-xs text-stone-700 dark:text-stone-300">
+                      {user.email}
+                    </span>
+                    <ChevronDown className={`w-3 h-3 text-stone-400 shrink-0 transition-transform duration-200 ${isProfileMenuOpen ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {/* Popover Dropdown */}
+                  {isProfileMenuOpen && (
+                    <div
+                      id="profile-popover"
+                      className="absolute right-0 top-full mt-2 w-52 sm:w-56 bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] rounded-2xl shadow-xl py-1.5 z-50 animate-in fade-in slide-in-from-top-2"
+                    >
+                      <div className="px-3.5 py-2.5 border-b border-[#F5F5F4] dark:border-[#383330]">
+                        <p className="text-[10px] font-semibold text-[#A8A29E] uppercase tracking-wider">Signed in as</p>
+                        <p className="text-xs font-medium text-[#1C1917] dark:text-[#FDFBF7] truncate mt-0.5">{user.email}</p>
+                      </div>
+                      <div className="p-1.5">
+                        <button
+                          id="logout-btn"
+                          onClick={() => {
+                            setIsProfileMenuOpen(false);
+                            logout();
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[#78716C] hover:text-red-600 dark:hover:text-red-400 rounded-xl hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors text-left"
+                          title="Log Out"
+                          aria-label="Log Out"
+                        >
+                          <LogOut className="w-4 h-4 text-red-500 shrink-0" />
+                          <span className="font-medium">Log out</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 min-w-0">
-            <button
-              id="reminder-preferences-btn"
-              onClick={() => setIsPreferencesOpen(true)}
-              className="p-1.5 sm:p-2 text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-white rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors shrink-0"
-              title="Reminder Preferences"
-            >
-              <Settings className="w-5 h-5" />
-            </button>
-
-            {/* Profile badge & Log Out */}
-            {user && (
-              <div 
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-stone-100 dark:bg-stone-800/80 text-stone-700 dark:text-stone-300 text-xs font-medium border border-stone-200 dark:border-stone-700/80 max-w-[120px] xs:max-w-[150px] sm:max-w-[180px] shrink-1 min-w-0"
-                title={`Logged in as ${user.email}`}
+          {/* Row 2: Segmented Filter Tabs (adjusts width according to screen width with touch scroll affordances) */}
+          <div className="relative w-full">
+            {/* Left Scroll Button */}
+            {canScrollLeft && (
+              <button
+                type="button"
+                onClick={() => {
+                  tabBarRef.current?.scrollBy({ left: -140, behavior: "smooth" });
+                }}
+                className="absolute -left-1.5 top-1/2 -translate-y-1/2 z-20 w-7 h-7 rounded-full bg-white dark:bg-[#292524] shadow-md border border-stone-200 dark:border-stone-700 flex items-center justify-center text-stone-700 dark:text-stone-200 hover:scale-110 active:scale-95 transition-transform"
+                title="Scroll tabs left"
+                aria-label="Scroll tabs left"
               >
-                <div className="w-4 h-4 rounded-full bg-amber-500 text-stone-950 flex items-center justify-center text-[10px] font-bold uppercase shrink-0">
-                  {user.email ? user.email[0] : "U"}
-                </div>
-                <span className="truncate text-[11px] sm:text-xs">{user.email}</span>
-              </div>
+                <ChevronLeft className="w-4 h-4" />
+              </button>
             )}
 
-            {user && (
+            <div 
+              ref={tabBarRef}
+              onScroll={checkTabBarScroll}
+              className="w-full overflow-x-auto no-scrollbar bg-stone-200/70 dark:bg-stone-800/70 p-1 rounded-xl text-xs font-medium scroll-smooth"
+            >
+              <div className="flex items-center gap-1 min-w-max sm:min-w-0 sm:w-full pr-8 sm:pr-0">
+                <button
+                  id="tab-priority"
+                  onClick={() => setActiveTab("priority")}
+                  className={`px-2.5 sm:px-3 py-1.5 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap sm:flex-1 ${
+                    activeTab === "priority"
+                      ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm rounded-lg font-semibold"
+                      : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white rounded-lg"
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                  Priority
+                </button>
+                <button
+                  id="tab-timeline"
+                  onClick={() => setActiveTab("timeline")}
+                  className={`px-2.5 sm:px-3 py-1.5 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap sm:flex-1 ${
+                    activeTab === "timeline"
+                      ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm rounded-lg font-semibold"
+                      : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white rounded-lg"
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5 text-blue-500" />
+                  Timeline
+                </button>
+                <button
+                  id="tab-captures"
+                  onClick={() => setActiveTab("captures")}
+                  className={`px-2.5 sm:px-3 py-1.5 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap sm:flex-1 ${
+                    activeTab === "captures"
+                      ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm rounded-lg font-semibold"
+                      : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white rounded-lg"
+                  }`}
+                >
+                  <Inbox className="w-3.5 h-3.5 text-emerald-500" />
+                  Inbox
+                  {captures.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-stone-300 dark:bg-stone-700 font-bold">
+                      {captures.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  id="tab-ask"
+                  onClick={() => { setActiveTab("ask"); setActiveEntity(null); }}
+                  className={`px-2.5 sm:px-3 py-1.5 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap sm:flex-1 ${
+                    activeTab === "ask"
+                      ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm rounded-lg font-semibold"
+                      : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white rounded-lg"
+                  }`}
+                >
+                  <Bot className="w-3.5 h-3.5 text-indigo-500" />
+                  Ask
+                </button>
+                <button
+                  id="tab-graph"
+                  onClick={() => { setActiveTab("graph"); setActiveEntity(null); }}
+                  className={`px-2.5 sm:px-3 py-1.5 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap sm:flex-1 ${
+                    activeTab === "graph"
+                      ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm rounded-lg font-semibold"
+                      : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white rounded-lg"
+                  }`}
+                >
+                  <Network className="w-3.5 h-3.5 text-purple-500" />
+                  Graph
+                </button>
+                <button
+                  id="tab-family"
+                  onClick={() => { setActiveTab("family"); setActiveEntity(null); }}
+                  className={`relative px-2.5 sm:px-3 py-1.5 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap sm:flex-1 ${
+                    activeTab === "family"
+                      ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm rounded-lg font-semibold"
+                      : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white rounded-lg"
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5 text-emerald-500" />
+                  Family
+                  {familyUnreadCount > 0 && (
+                    <span className="ml-1 px-1.5 py-0.2 bg-red-500 text-white text-[9px] font-bold rounded-full">
+                      {familyUnreadCount > 9 ? "9+" : familyUnreadCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Right Scroll Button */}
+            {canScrollRight && (
               <button
-                id="logout-btn"
-                onClick={logout}
-                className="p-1.5 text-[#78716C] hover:text-red-600 dark:text-stone-400 dark:hover:text-white rounded-lg border border-stone-200 dark:border-stone-700/80 hover:bg-red-50 dark:hover:bg-white/5 transition-colors shrink-0 flex items-center justify-center"
-                title="Log Out"
-                aria-label="Log Out"
+                type="button"
+                onClick={() => {
+                  tabBarRef.current?.scrollBy({ left: 140, behavior: "smooth" });
+                }}
+                className="absolute -right-1.5 top-1/2 -translate-y-1/2 z-20 w-7 h-7 rounded-full bg-white dark:bg-[#292524] shadow-md border border-stone-200 dark:border-stone-700 flex items-center justify-center text-stone-700 dark:text-stone-200 hover:scale-110 active:scale-95 transition-transform"
+                title="Scroll tabs right"
+                aria-label="Scroll tabs right"
               >
-                <LogOut className="w-4 h-4" />
+                <ChevronRight className="w-4 h-4" />
               </button>
             )}
           </div>
-        </div>
 
-        {/* Row 2: Segmented Filter Tabs */}
-        <div className="w-full overflow-x-auto no-scrollbar">
-          <div className="flex items-center gap-1 bg-stone-200/70 dark:bg-stone-800/70 p-1 rounded-xl text-xs font-medium text-stone-600 dark:text-stone-300 min-w-max">
-            <button
-              id="tab-priority"
-              onClick={() => setActiveTab("priority")}
-              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                activeTab === "priority"
-                  ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
-                  : "hover:text-[#1C1917] dark:hover:text-white"
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              Home
-            </button>
-            <button
-              id="tab-timeline"
-              onClick={() => setActiveTab("timeline")}
-              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                activeTab === "timeline"
-                  ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
-                  : "hover:text-[#1C1917] dark:hover:text-white"
-              }`}
-            >
-              <Calendar className="w-3.5 h-3.5 text-blue-500" />
-              Timeline
-            </button>
-            <button
-              id="tab-captures"
-              onClick={() => setActiveTab("captures")}
-              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                activeTab === "captures"
-                  ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
-                  : "hover:text-[#1C1917] dark:hover:text-white"
-              }`}
-            >
-              <Inbox className="w-3.5 h-3.5 text-emerald-500" />
-              Inbox
-              {captures.length > 0 && (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-stone-300 dark:bg-stone-700">
-                  {captures.length}
-                </span>
-              )}
-            </button>
-            <button
-              id="tab-ask"
-              onClick={() => { setActiveTab("ask"); setActiveEntity(null); }}
-              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                activeTab === "ask"
-                  ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
-                  : "hover:text-indigo-600 dark:hover:text-indigo-400"
-              }`}
-            >
-              <Bot className="w-3.5 h-3.5 text-indigo-500" />
-              Ask AI
-            </button>
-            <button
-              id="tab-graph"
-              onClick={() => { setActiveTab("graph"); setActiveEntity(null); }}
-              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                activeTab === "graph"
-                  ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
-                  : "hover:text-[#1C1917] dark:hover:text-white"
-              }`}
-            >
-              <Network className="w-3.5 h-3.5 text-purple-500" />
-              Entities
-            </button>
-            <button
-              id="tab-family"
-              onClick={() => { setActiveTab("family"); setActiveEntity(null); }}
-              className={`relative px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                activeTab === "family"
-                  ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm font-semibold"
-                  : "hover:text-[#1C1917] dark:hover:text-white"
-              }`}
-            >
-              <Users className="w-3.5 h-3.5 text-emerald-500" />
-              Family
-              {familyUnreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-                  {familyUnreadCount > 9 ? "9+" : familyUnreadCount}
-                </span>
-              )}
-            </button>
+          {/* Row 3: Search Bar located directly under the tab bar */}
+          <div className="relative w-full">
+            <Search className="w-4 h-4 text-[#A8A29E] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              id="search-input"
+              type="text"
+              placeholder="Search bills, renewals, tasks..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] rounded-xl text-xs placeholder:text-[#A8A29E] text-[#1C1917] dark:text-[#FDFBF7] focus:outline-none focus:ring-1 focus:ring-amber-500 transition-all shadow-xs"
+            />
           </div>
-        </div>
-
-        {/* Row 3: Search Bar relocated just below tabbar */}
-        <div className="relative w-full">
-          <Search className="w-4 h-4 text-[#A8A29E] absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            id="search-input"
-            type="text"
-            placeholder="Search bills, renewals, tasks..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-transparent dark:bg-[#1C1917] border border-stone-300 dark:border-stone-700/80 rounded-full text-xs text-[#1C1917] dark:text-[#FDFBF7] placeholder:text-[#A8A29E] focus:outline-none focus:ring-1 focus:ring-stone-400 transition-all"
-          />
         </div>
       </header>
 
@@ -446,6 +572,114 @@ export function Dashboard() {
         {/* ---------------------------------------------------- */}
         {!loading && activeTab === "priority" && (
           <div className="space-y-8">
+            {/* Family Sharing Banner (Conditional) */}
+            {!isFamilyBannerDismissed && (familyUnreadCount > 0 || items.some(i => i.isFamilyShared || (i.metadata as any)?.isFamilyShared)) && (
+              <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/60 rounded-xl p-3.5 flex items-center justify-between text-xs gap-3">
+                <div className="flex items-center gap-2.5 text-amber-900 dark:text-amber-200 min-w-0">
+                  <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-700 dark:text-amber-400 shrink-0">
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <span className="truncate">
+                    <strong>Family Hub:</strong> {familyUnreadCount > 0 ? `${familyUnreadCount} unread shared activity items.` : "Shared circle items are synced and active."}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => { setActiveTab("family"); setActiveEntity(null); }}
+                    className="text-amber-800 dark:text-amber-300 font-semibold hover:underline"
+                  >
+                    View
+                  </button>
+                  <button
+                    onClick={() => setIsFamilyBannerDismissed(true)}
+                    className="p-1 text-amber-700/60 dark:text-amber-400/60 hover:text-amber-900 dark:hover:text-amber-200 rounded"
+                    title="Dismiss alert"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Reminders / Due Today Carousel */}
+            {(() => {
+              const reminderItems = [...timeline.needsAttention, ...timeline.today].filter(
+                (item) => item.status !== "completed"
+              );
+              if (reminderItems.length === 0) return null;
+              return (
+                <section id="section-reminders-carousel" className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-stone-800 dark:text-stone-200">
+                      <Bell className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                      <h2 className="text-xs font-semibold uppercase tracking-wider">
+                        Reminders & Due Today ({reminderItems.length})
+                      </h2>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 overflow-x-auto no-scrollbar py-1">
+                    {reminderItems.map((item) => {
+                      const isOverdue = item.badgeVariant === "urgent" || (item.dueDate && new Date(item.dueDate).getTime() < Date.now());
+                      const isToday = !isOverdue && item.dueDate && new Date(item.dueDate).toDateString() === new Date().toDateString();
+                      return (
+                        <div
+                          key={`carousel-${item.id}`}
+                          className="min-w-[250px] sm:min-w-[270px] max-w-[290px] p-3.5 rounded-xl bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] shadow-sm hover:shadow-md transition-all flex flex-col justify-between shrink-0"
+                        >
+                          <div>
+                            <div className="flex items-center justify-between gap-1.5 mb-2">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide uppercase ${
+                                isOverdue
+                                  ? "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200 dark:border-rose-900/60"
+                                  : isToday
+                                  ? "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 dark:border-amber-900/60"
+                                  : "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border border-blue-200 dark:border-blue-900/60"
+                              }`}>
+                                {isOverdue ? "Overdue" : isToday ? "Today" : "Upcoming"}
+                              </span>
+                              {item.dueDate && (
+                                <span className="text-[11px] text-[#A8A29E] flex items-center gap-1">
+                                  <Calendar className="w-3 h-3" />
+                                  {new Date(item.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                                </span>
+                              )}
+                            </div>
+                            <h4 className="text-xs sm:text-sm font-semibold text-[#1C1917] dark:text-[#FDFBF7] line-clamp-2">
+                              {item.title}
+                            </h4>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-[#F5F5F4] dark:border-[#383330]">
+                            <button
+                              onClick={() => handleToggleComplete(item.id, true)}
+                              className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:text-emerald-800"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              Done
+                            </button>
+                            <button
+                              onClick={() => handleSnooze(item.id, 1)}
+                              className="inline-flex items-center gap-1 text-[11px] text-[#78716C] hover:text-[#1C1917] dark:hover:text-white"
+                            >
+                              <Clock className="w-3.5 h-3.5" />
+                              +1d
+                            </button>
+                            <button
+                              onClick={() => setEditingItem(item)}
+                              className="text-[11px] text-[#78716C] hover:text-[#1C1917] dark:hover:text-white"
+                            >
+                              Edit
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })()}
+
             {/* 1. NEEDS ATTENTION (Urgent, Overdue, AI Review) */}
             {timeline.needsAttention.length > 0 && (
               <section id="section-needs-attention" className="space-y-3">
