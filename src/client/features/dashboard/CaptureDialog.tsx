@@ -44,7 +44,7 @@ export function CaptureDialog({ isOpen, onClose, onSubmit }: CaptureDialogProps)
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 sm:p-0">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 sm:p-0" style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}>
       <div 
         className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" 
         onClick={onClose}

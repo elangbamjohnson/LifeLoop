@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from "react";
 import { X, Bell, Globe, Moon, ShieldCheck, Check, Loader2 } from "lucide-react";
-import { useDeviceSimulator } from "../simulator/DeviceSimulator";
-
 interface PreferencesModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -10,21 +8,17 @@ interface PreferencesModalProps {
 export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
   if (!isOpen) return null;
 
-  const { mode, isMobileMode } = useDeviceSimulator();
-  const [isWindowMobile, setIsWindowMobile] = useState(
+  const [isMobile, setIsMobile] = useState(
     typeof window !== "undefined" ? window.innerWidth < 640 : false
   );
 
   useEffect(() => {
     const handleResize = () => {
-      setIsWindowMobile(window.innerWidth < 640);
+      setIsMobile(window.innerWidth < 640);
     };
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
-
-  // Truly mobile if either simulated as mobile, or full-window with width < 640px
-  const isMobile = isMobileMode || (mode === "full" && isWindowMobile);
 
   const [autoReminders, setAutoReminders] = useState(false);
   const [channels, setChannels] = useState<string[]>(["web"]);
@@ -114,11 +108,12 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
     >
       <div
         id="preferences-modal-card"
-        className={`w-full overflow-y-auto overscroll-contain no-scrollbar bg-white dark:bg-[#23201E] border border-[#E7E5E4] dark:border-[#383330] shadow-2xl pb-0 ${
+        className={`w-full overflow-y-auto overscroll-contain no-scrollbar bg-white dark:bg-[#23201E] border border-[#E7E5E4] dark:border-[#383330] shadow-2xl ${
           isMobile
             ? "max-w-lg max-h-[92vh] rounded-t-3xl p-5"
             : "max-w-md md:max-w-xl max-h-[85vh] rounded-3xl p-7"
         }`}
+        style={isMobile ? { paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom))' } : undefined}
       >
         {/* Mobile bottom sheet drag handle */}
         {isMobile && (

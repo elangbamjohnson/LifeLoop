@@ -8,7 +8,7 @@ import { AuthProvider, useAuth } from "./client/hooks/useAuth";
 import { ThemeProvider } from "./client/hooks/useTheme";
 import { AuthScreen } from "./client/features/auth/AuthScreen";
 import { Dashboard } from "./client/features/dashboard/Dashboard";
-import { DeviceSimulator } from "./client/features/simulator/DeviceSimulator";
+
 import { AcceptInvitePage } from "./client/features/family/AcceptInvitePage";
 
 function AppRoutes() {
@@ -45,9 +45,7 @@ export default function App() {
     <ThemeProvider>
       <AuthProvider>
         <Router>
-          <DeviceSimulator>
-            <AppRoutes />
-          </DeviceSimulator>
+          <AppRoutes />
         </Router>
       </AuthProvider>
     </ThemeProvider>

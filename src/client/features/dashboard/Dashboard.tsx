@@ -1057,7 +1057,7 @@ export function Dashboard() {
       </main>
 
       {/* 5. CAPTURE BUTTON (Floating Action Button) */}
-      <div className="fixed bottom-6 right-6 z-40">
+      <div className="fixed bottom-6 right-6 z-40" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         <button
           id="global-capture-btn"
           onClick={() => setIsCaptureOpen(true)}
