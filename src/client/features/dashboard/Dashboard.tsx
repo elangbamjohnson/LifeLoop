@@ -349,13 +349,14 @@ export function Dashboard() {
               <button
                 id="reminder-preferences-btn"
                 onClick={() => setIsPreferencesOpen(true)}
-                className="p-1.5 sm:p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors shrink-0 text-[#78716C] dark:text-[#A8A29E]"
+                className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors shrink-0 text-[#78716C] dark:text-[#A8A29E] flex items-center justify-center min-w-[36px] min-h-[36px]"
                 title="Reminder Preferences"
+                aria-label="Reminder Preferences"
               >
                 <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
 
-              {/* Profile badge with dropdown popover showing Logout */}
+              {/* Profile badge with dropdown popover showing Preferences and Logout */}
               {user && (
                 <div className="relative shrink min-w-0" ref={profileMenuRef}>
                   <button
@@ -385,7 +386,20 @@ export function Dashboard() {
                         <p className="text-[10px] font-semibold text-[#A8A29E] uppercase tracking-wider">Signed in as</p>
                         <p className="text-xs font-medium text-[#1C1917] dark:text-[#FDFBF7] truncate mt-0.5">{user.email}</p>
                       </div>
-                      <div className="p-1.5">
+                      <div className="p-1.5 space-y-0.5">
+                        <button
+                          id="profile-preferences-btn"
+                          onClick={() => {
+                            setIsProfileMenuOpen(false);
+                            setIsPreferencesOpen(true);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[#1C1917] dark:text-[#FDFBF7] hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition-colors text-left"
+                          title="Reminder Preferences"
+                          aria-label="Reminder Preferences"
+                        >
+                          <Settings className="w-4 h-4 text-amber-500 shrink-0" />
+                          <span className="font-medium">Preferences</span>
+                        </button>
                         <button
                           id="logout-btn"
                           onClick={() => {
@@ -625,7 +639,11 @@ export function Dashboard() {
                       return (
                         <div
                           key={`carousel-${item.id}`}
-                          className="min-w-[250px] sm:min-w-[270px] max-w-[290px] p-3.5 rounded-xl bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] shadow-sm hover:shadow-md transition-all flex flex-col justify-between shrink-0"
+                          className={`p-3.5 rounded-xl bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] shadow-sm hover:shadow-md transition-all flex flex-col justify-between ${
+                            reminderItems.length === 1
+                              ? "w-full"
+                              : "min-w-[250px] sm:min-w-[270px] max-w-[290px] shrink-0"
+                          }`}
                         >
                           <div>
                             <div className="flex items-center justify-between gap-1.5 mb-2">
