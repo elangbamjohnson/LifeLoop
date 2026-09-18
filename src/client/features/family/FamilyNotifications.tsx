@@ -57,7 +57,7 @@ export function FamilyNotifications({ onClose, onNotificationAction }: Props) {
   };
 
   return (
-    <div className="absolute right-0 top-full mt-2 w-[360px] bg-white dark:bg-[#292524] rounded-2xl shadow-2xl border border-[#E7E5E4] dark:border-[#44403C] z-50 overflow-hidden">
+    <div className="absolute right-0 top-full mt-2 w-[calc(100vw-2rem)] max-w-sm sm:w-[360px] bg-white dark:bg-[#292524] rounded-2xl shadow-2xl border border-[#E7E5E4] dark:border-[#44403C] z-50 overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 border-b border-[#E7E5E4] dark:border-[#44403C]">
         <div className="flex items-center gap-2">
           <Bell size={16} className="text-[#78716C]" />

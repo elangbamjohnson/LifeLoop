@@ -4,6 +4,20 @@ import { clsx } from 'clsx';
 
 type ViewMode = 'full' | 'mobile' | 'tablet';
 
+export interface DeviceSimulatorContextType {
+  mode: ViewMode;
+  isMobileMode: boolean;
+  isTabletMode: boolean;
+}
+
+export const DeviceSimulatorContext = React.createContext<DeviceSimulatorContextType>({
+  mode: 'full',
+  isMobileMode: false,
+  isTabletMode: false,
+});
+
+export const useDeviceSimulator = () => React.useContext(DeviceSimulatorContext);
+
 export function DeviceSimulator({ children }: { children: React.ReactNode }) {
   const [mode, setMode] = useState<ViewMode>('full');
   const [isOpen, setIsOpen] = useState(false);
@@ -26,11 +40,14 @@ export function DeviceSimulator({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   ) : (
-    <div className={clsx(
-      "transition-all duration-300 overflow-hidden shadow-2xl relative mx-auto mt-8 flex-shrink-0",
-      mode === 'mobile' ? "w-[375px] h-[812px] border-[12px] border-black rounded-[3rem]" : 
-      "w-[768px] h-[1024px] border-[12px] border-black rounded-[3rem]"
-    )}>
+    <div
+      style={{ transform: 'translateZ(0)' }}
+      className={clsx(
+        "transition-all duration-300 overflow-hidden shadow-2xl relative mx-auto mt-8 flex-shrink-0 [transform:translateZ(0)]",
+        mode === 'mobile' ? "w-[375px] h-[812px] border-[12px] border-black rounded-[3rem]" : 
+        "w-[768px] h-[1024px] border-[12px] border-black rounded-[3rem]"
+      )}
+    >
        <div className="w-full h-full overflow-y-auto bg-[#FDFBF7] dark:bg-[#1C1917] relative scroll-smooth rounded-[2rem]">
           {children}
        </div>
@@ -38,45 +55,47 @@ export function DeviceSimulator({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <div className={clsx(mode !== 'full' && "min-h-screen w-full bg-[#1e1e1e] overflow-y-auto flex items-start justify-center pb-8")}>
-      {content}
-      
-      {/* Dropdown Floating Button */}
-      <div className="fixed top-4 left-4 z-[9999]" ref={dropdownRef}>
-        <button 
-          onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center gap-2 bg-[#171717] text-[#EDEDED] px-3 py-2 rounded-xl border border-[#2a2a2a] hover:bg-[#262626] transition-colors shadow-lg"
-        >
-          <ActiveIcon size={22} strokeWidth={1.5} />
-          <span className="text-xl font-light text-[#737373] -mt-0.5">/</span>
-        </button>
+    <DeviceSimulatorContext.Provider value={{ mode, isMobileMode: mode === 'mobile', isTabletMode: mode === 'tablet' }}>
+      <div className={clsx(mode !== 'full' && "min-h-screen w-full bg-[#1e1e1e] overflow-y-auto flex items-start justify-center pb-8")}>
+        {content}
+        
+        {/* Dropdown Floating Button (z-30 so z-50 modals cleanly cover it) */}
+        <div className="fixed bottom-20 left-4 sm:bottom-auto sm:top-4 sm:left-4 z-30" ref={dropdownRef}>
+          <button 
+            onClick={() => setIsOpen(!isOpen)}
+            className="flex items-center gap-2 bg-[#171717] text-[#EDEDED] px-3 py-2 rounded-xl border border-[#2a2a2a] hover:bg-[#262626] transition-colors shadow-lg"
+          >
+            <ActiveIcon size={22} strokeWidth={1.5} />
+            <span className="text-xl font-light text-[#737373] -mt-0.5">/</span>
+          </button>
 
-        {isOpen && (
-          <div className="absolute top-full left-0 mt-2 w-[220px] bg-[#171717] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden py-1.5 animate-in fade-in slide-in-from-top-2 duration-200">
-            <button 
-              onClick={() => { setMode('full'); setIsOpen(false); }}
-              className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#262626] text-[#EDEDED] transition-colors text-left"
-            >
-              <MonitorSmartphone size={18} strokeWidth={1.5} className="text-[#a3a3a3]" />
-              <span className="font-medium text-[15px]">Current screen size</span>
-            </button>
-            <button 
-              onClick={() => { setMode('mobile'); setIsOpen(false); }}
-              className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#262626] text-[#EDEDED] transition-colors text-left"
-            >
-              <Smartphone size={18} strokeWidth={1.5} className="text-[#a3a3a3]" />
-              <span className="font-medium text-[15px]">Mobile</span>
-            </button>
-            <button 
-              onClick={() => { setMode('tablet'); setIsOpen(false); }}
-              className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#262626] text-[#EDEDED] transition-colors text-left"
-            >
-              <Tablet size={18} strokeWidth={1.5} className="text-[#a3a3a3]" />
-              <span className="font-medium text-[15px]">Tablet</span>
-            </button>
-          </div>
-        )}
+          {isOpen && (
+            <div className="absolute bottom-full mb-2 sm:bottom-auto sm:top-full sm:mt-2 left-0 w-[220px] bg-[#171717] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden py-1.5 animate-in fade-in duration-200">
+              <button 
+                onClick={() => { setMode('full'); setIsOpen(false); }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#262626] text-[#EDEDED] transition-colors text-left"
+              >
+                <MonitorSmartphone size={18} strokeWidth={1.5} className="text-[#a3a3a3]" />
+                <span className="font-medium text-[15px]">Current screen size</span>
+              </button>
+              <button 
+                onClick={() => { setMode('mobile'); setIsOpen(false); }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#262626] text-[#EDEDED] transition-colors text-left"
+              >
+                <Smartphone size={18} strokeWidth={1.5} className="text-[#a3a3a3]" />
+                <span className="font-medium text-[15px]">Mobile</span>
+              </button>
+              <button 
+                onClick={() => { setMode('tablet'); setIsOpen(false); }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#262626] text-[#EDEDED] transition-colors text-left"
+              >
+                <Tablet size={18} strokeWidth={1.5} className="text-[#a3a3a3]" />
+                <span className="font-medium text-[15px]">Tablet</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </DeviceSimulatorContext.Provider>
   );
 }

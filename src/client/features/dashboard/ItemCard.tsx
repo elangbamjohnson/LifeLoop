@@ -6,17 +6,20 @@ import {
   Bell, 
   Edit3, 
   Trash2, 
-  ChevronDown, 
   AlertCircle,
-  Hourglass,
-  Tag,
-  CreditCard,
-  RefreshCw,
-  FileText,
-  ShieldCheck,
-  ShoppingBag,
-  UserCheck,
-  Sparkles
+  Hourglass, 
+  Tag, 
+  CreditCard, 
+  RefreshCw, 
+  FileText, 
+  ShieldCheck, 
+  ShoppingBag, 
+  UserCheck, 
+  Sparkles,
+  Car,
+  Users,
+  Paperclip,
+  ChevronDown
 } from "lucide-react";
 import { TimelineItem } from "../../../shared/utils/timeline";
 
@@ -38,54 +41,102 @@ export const ItemCard: React.FC<ItemCardProps> = ({
   onDelete,
   onConfirmAI,
 }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
   const [showSnoozeMenu, setShowSnoozeMenu] = useState(false);
   const isCompleted = item.status === "completed";
   const isPendingReview = item.status === "pending_review";
 
-  // Type-specific icon
-  const getTypeIcon = (type: string) => {
-    switch (type) {
+  // Category theme helper
+  const getCategoryTheme = (type: string) => {
+    switch (type.toLowerCase()) {
       case "payment":
-        return <CreditCard className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />;
+      case "bill":
+      case "financial":
+        return {
+          pillClass: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+          icon: <CreditCard className="w-3.5 h-3.5" />,
+          label: "Financial"
+        };
+      case "document":
+        return {
+          pillClass: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+          icon: <FileText className="w-3.5 h-3.5" />,
+          label: "Document"
+        };
+      case "vehicle":
+      case "car":
+      case "warranty":
+        return {
+          pillClass: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
+          icon: <Car className="w-3.5 h-3.5" />,
+          label: type.toLowerCase() === "warranty" ? "Warranty" : "Vehicle"
+        };
       case "renewal":
       case "subscription":
-        return <RefreshCw className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />;
+      case "task":
       case "appointment":
-        return <Calendar className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />;
-      case "warranty":
-        return <ShieldCheck className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />;
-      case "waiting_for":
-        return <Hourglass className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />;
-      case "purchase":
-        return <ShoppingBag className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />;
-      case "document":
-        return <FileText className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />;
       case "reminder":
-        return <Bell className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />;
+        return {
+          pillClass: "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300",
+          icon: type === "appointment" ? <Calendar className="w-3.5 h-3.5" /> : type === "reminder" ? <Bell className="w-3.5 h-3.5" /> : <RefreshCw className="w-3.5 h-3.5" />,
+          label: type === "renewal" ? "Renewal" : type === "subscription" ? "Subscription" : type === "appointment" ? "Appointment" : "Task"
+        };
+      case "waiting_for":
+      case "person":
+      case "memory":
+      case "personal":
+        return {
+          pillClass: "bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300",
+          icon: type === "waiting_for" ? <Hourglass className="w-3.5 h-3.5" /> : <UserCheck className="w-3.5 h-3.5" />,
+          label: type === "waiting_for" ? "Waiting For" : "Personal"
+        };
       default:
-        return <Tag className="w-3.5 h-3.5 text-[#78716C]" />;
-    }
-  };
-
-  // Badge styling
-  const getBadgeClass = (variant?: string) => {
-    switch (variant) {
-      case "urgent":
-        return "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200 dark:border-amber-800/60";
-      case "today":
-        return "bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300 border-rose-200 dark:border-rose-800/60 font-semibold";
-      case "upcoming":
-        return "bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200 dark:border-blue-800/60";
-      case "completed":
-        return "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400 border-neutral-200 dark:border-neutral-700";
-      default:
-        return "bg-stone-100 text-stone-700 dark:bg-stone-800/60 dark:text-stone-300 border-stone-200 dark:border-stone-700/60";
+        return {
+          pillClass: "bg-stone-100 text-stone-700 dark:bg-stone-800 dark:text-stone-300",
+          icon: <Tag className="w-3.5 h-3.5" />,
+          label: type.replace("_", " ")
+        };
     }
   };
 
   const amount = item.metadata?.amount;
   const currency = item.metadata?.currency || "INR";
   const currencySymbol = currency === "USD" ? "$" : currency === "EUR" ? "€" : currency === "GBP" ? "£" : "₹";
+  const policyNumber = item.metadata?.policyNumber || item.metadata?.policy_number || item.metadata?.policyNo;
+  const vin = item.metadata?.vin || item.metadata?.vinNumber;
+  const location = item.metadata?.location;
+  const descriptionText = item.metadata?.description || item.metadata?.notes || item.metadata?.rawPayload || null;
+  const isFamilyShared = Boolean(item.metadata?.familyShared || item.metadata?.sharedWithFamily || item.metadata?.isShared);
+
+  const rawTags = item.metadata?.tags;
+  const tags: string[] = Array.isArray(rawTags) 
+    ? rawTags 
+    : typeof rawTags === "string" 
+    ? rawTags.split(",").map(t => t.trim()).filter(Boolean)
+    : [];
+
+  const categoryTheme = getCategoryTheme(item.itemType);
+
+  // Due Date alert pill variant
+  const getDueDatePill = () => {
+    if (!item.badgeText && !item.dueDate) return null;
+    const text = item.badgeText || (item.dueDate ? `Due ${new Date(item.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : null);
+    if (!text) return null;
+
+    let className = "bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 border border-stone-200 dark:border-stone-700/60";
+    if (item.badgeVariant === "urgent") {
+      className = "bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-900";
+    } else if (item.badgeVariant === "today") {
+      className = "bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900";
+    } else if (item.badgeVariant === "upcoming") {
+      className = "bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-900/60";
+    }
+
+    return { text, className };
+  };
+
+  const dueDatePill = getDueDatePill();
+  const hasStructuredFields = Boolean(amount !== undefined && amount !== null) || Boolean(item.dueDate) || Boolean(policyNumber) || Boolean(vin) || Boolean(location) || Boolean(item.snoozedUntil);
 
   // Specialized UI for Waiting For items
   if (item.itemType === "waiting_for" && !isPendingReview) {
@@ -95,25 +146,35 @@ export const ItemCard: React.FC<ItemCardProps> = ({
     return (
       <div
         id={`item-card-${item.id}`}
-        className={`group relative bg-white dark:bg-[#23201E] border ${
+        onClick={() => setIsExpanded(!isExpanded)}
+        className={`group relative bg-white dark:bg-[#292524] rounded-2xl p-3.5 sm:p-4 border cursor-pointer ${
           isCompleted
             ? "border-[#E7E5E4] dark:border-[#383330] opacity-60"
             : isOverdue
             ? "border-amber-300 dark:border-amber-700/80 bg-amber-50/20 dark:bg-amber-950/10"
-            : "border-[#E7E5E4] dark:border-[#383330] hover:border-[#D6D3D1] dark:hover:border-[#57534E]"
-        } rounded-2xl p-4 transition-all duration-150 shadow-sm`}
+            : "border-[#E7E5E4] dark:border-[#44403C] hover:border-[#D6D3D1] dark:hover:border-[#57534E]"
+        } transition-all shadow-sm hover:shadow`}
       >
-        <div className="flex flex-col gap-3">
-          <div className="flex justify-between items-start">
-            <div>
-              <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded border border-purple-200 dark:border-purple-900/50 text-purple-700 dark:text-purple-400 mb-2">
+        <div className="flex flex-col gap-2">
+          <div className="flex justify-between items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wider uppercase px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border border-purple-200 dark:border-purple-900/50 mb-1.5">
                 <Hourglass className="w-3 h-3" />
                 Waiting For
               </span>
-              <h3 className="text-sm font-semibold text-[#78716C] dark:text-[#A8A29E]">{person}</h3>
-              <p className={`text-base font-medium leading-snug ${isCompleted ? 'line-through text-[#A8A29E]' : 'text-[#1C1917] dark:text-[#FDFBF7]'}`}>
-                {item.title}
-              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-xs font-semibold text-[#78716C] dark:text-[#A8A29E]">{person}</h3>
+                <span className="text-xs text-[#A8A29E]">•</span>
+                <h4
+                  className={`text-base font-medium leading-snug tracking-tight ${
+                    isCompleted
+                      ? "line-through text-[#A8A29E] dark:text-[#78716C]"
+                      : "text-[#1C1917] dark:text-[#FDFBF7]"
+                  }`}
+                >
+                  {item.title}
+                </h4>
+              </div>
               <div className="mt-1 flex items-center gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
                 {isCompleted ? (
                    <span>Received {item.completedAt ? new Date(item.completedAt).toLocaleDateString() : ''}</span>
@@ -127,16 +188,52 @@ export const ItemCard: React.FC<ItemCardProps> = ({
               </div>
             </div>
             
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-               <button onClick={() => onEdit(item)} className="p-1.5 text-[#78716C] hover:text-[#1C1917] dark:hover:text-white rounded-lg hover:bg-black/5 dark:hover:bg-white/5" title="Edit"><Edit3 className="w-4 h-4" /></button>
-               <button onClick={() => onDelete(item.id)} className="p-1.5 text-[#78716C] hover:text-red-600 rounded-lg hover:bg-black/5 dark:hover:bg-white/5" title="Delete"><Trash2 className="w-4 h-4" /></button>
+            {/* Quick Action Buttons (Always Visible, Never Auto-Hidden) + Chevron */}
+            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+               <button 
+                 id={`edit-item-${item.id}`} 
+                 onClick={(e) => {
+                   e.stopPropagation();
+                   onEdit(item);
+                 }} 
+                 className="p-1.5 text-[#78716C] hover:text-[#1C1917] dark:hover:text-white rounded-lg hover:bg-black/5 dark:hover:bg-white/5" 
+                 title="Edit"
+               >
+                 <Edit3 className="w-4 h-4" />
+               </button>
+               <button 
+                 id={`delete-item-${item.id}`} 
+                 onClick={(e) => {
+                   e.stopPropagation();
+                   onDelete(item.id);
+                 }} 
+                 className="p-1.5 text-[#78716C] hover:text-red-600 rounded-lg hover:bg-black/5 dark:hover:bg-white/5" 
+                 title="Delete"
+               >
+                 <Trash2 className="w-4 h-4" />
+               </button>
+               <div 
+                 onClick={(e) => {
+                   e.stopPropagation();
+                   setIsExpanded(!isExpanded);
+                 }}
+                 className="p-1.5 text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                 title={isExpanded ? "Collapse" : "Expand"}
+               >
+                 <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+               </div>
             </div>
           </div>
           
-          {!isCompleted && (
-            <div className="flex flex-wrap items-center gap-2 mt-1">
+          {/* Expanded Actions & Details */}
+          {isExpanded && !isCompleted && (
+            <div className="flex flex-wrap items-center gap-2 mt-2 pt-2.5 border-t border-[#F5F5F4] dark:border-[#383330] animate-in fade-in duration-200" onClick={(e) => e.stopPropagation()}>
               <button 
-                onClick={() => onToggleComplete(item.id, true)} 
+                id={`toggle-complete-${item.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleComplete(item.id, true);
+                }} 
                 className="px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 rounded-lg text-xs font-medium hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors flex items-center gap-1.5"
               >
                  <Check className="w-3.5 h-3.5" /> Received
@@ -144,23 +241,28 @@ export const ItemCard: React.FC<ItemCardProps> = ({
               
               <div className="relative">
                 <button 
-                  onClick={() => setShowSnoozeMenu(!showSnoozeMenu)} 
+                  id={`snooze-btn-${item.id}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowSnoozeMenu(!showSnoozeMenu);
+                  }} 
                   className="px-3 py-1.5 bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 border border-stone-200 dark:border-stone-700/60 rounded-lg text-xs font-medium hover:bg-stone-200 dark:hover:bg-stone-700 transition-colors flex items-center gap-1.5"
                 >
                    <Clock className="w-3.5 h-3.5" /> Remind me later
                 </button>
                 {showSnoozeMenu && (
-                  <div className="absolute left-0 top-full mt-1.5 w-36 bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] rounded-xl shadow-lg py-1 z-30 text-xs">
+                  <div id={`snooze-menu-${item.id}`} className="absolute left-0 top-full mt-1.5 w-36 bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] rounded-xl shadow-lg py-1 z-30 text-xs">
                     <div className="px-3 py-1 text-[10px] font-semibold text-[#A8A29E] uppercase tracking-wider">Snooze for</div>
-                    <button onClick={() => { onSnooze(item.id, 1); setShowSnoozeMenu(false); }} className="w-full text-left px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/5 text-[#1C1917] dark:text-[#FDFBF7]">+1 Day (Tomorrow)</button>
-                    <button onClick={() => { onSnooze(item.id, 3); setShowSnoozeMenu(false); }} className="w-full text-left px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/5 text-[#1C1917] dark:text-[#FDFBF7]">+3 Days</button>
-                    <button onClick={() => { onSnooze(item.id, 7); setShowSnoozeMenu(false); }} className="w-full text-left px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/5 text-[#1C1917] dark:text-[#FDFBF7]">Next Week (+7d)</button>
+                    <button onClick={(e) => { e.stopPropagation(); onSnooze(item.id, 1); setShowSnoozeMenu(false); }} className="w-full text-left px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/5 text-[#1C1917] dark:text-[#FDFBF7]">+1 Day (Tomorrow)</button>
+                    <button onClick={(e) => { e.stopPropagation(); onSnooze(item.id, 3); setShowSnoozeMenu(false); }} className="w-full text-left px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/5 text-[#1C1917] dark:text-[#FDFBF7]">+3 Days</button>
+                    <button onClick={(e) => { e.stopPropagation(); onSnooze(item.id, 7); setShowSnoozeMenu(false); }} className="w-full text-left px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/5 text-[#1C1917] dark:text-[#FDFBF7]">Next Week (+7d)</button>
                   </div>
                 )}
               </div>
               
               <button 
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   console.log("Analytics Event: FEATURE_USAGE", { feature: "WAITING_FOR_FOLLOW_UP", itemId: item.id });
                   window.location.href = `mailto:?subject=Following up regarding ${item.title}&body=Hi ${person},%0D%0A%0D%0AJust following up on this.`;
                 }} 
@@ -178,140 +280,60 @@ export const ItemCard: React.FC<ItemCardProps> = ({
   return (
     <div
       id={`item-card-${item.id}`}
-      className={`group relative bg-white dark:bg-[#23201E] border ${
+      onClick={() => setIsExpanded(!isExpanded)}
+      className={`group relative bg-white dark:bg-[#292524] rounded-2xl p-3.5 sm:p-4 border cursor-pointer ${
         isPendingReview
-          ? "border-amber-300 dark:border-amber-700/80 bg-amber-50/30 dark:bg-amber-950/10"
+          ? "border-amber-300 dark:border-amber-700/80 bg-amber-50/20 dark:bg-amber-950/10"
           : isCompleted
           ? "border-[#E7E5E4] dark:border-[#383330] opacity-60"
-          : "border-[#E7E5E4] dark:border-[#383330] hover:border-[#D6D3D1] dark:hover:border-[#57534E]"
-      } rounded-2xl p-4 transition-all duration-150 shadow-sm`}
+          : "border-[#E7E5E4] dark:border-[#44403C] hover:border-[#D6D3D1] dark:hover:border-[#57534E]"
+      } transition-all shadow-sm hover:shadow`}
     >
-      <div className="flex items-start gap-3.5">
-        {/* Checkbox button */}
-        {!isPendingReview ? (
-          <button
-            id={`toggle-complete-${item.id}`}
-            onClick={() => onToggleComplete(item.id, !isCompleted)}
-            className={`mt-0.5 w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${
-              isCompleted
-                ? "bg-[#1C1917] dark:bg-[#FDFBF7] border-[#1C1917] dark:border-[#FDFBF7] text-white dark:text-[#1C1917]"
-                : "border-[#D6D3D1] dark:border-[#57534E] hover:border-[#1C1917] dark:hover:border-[#FDFBF7]"
-            }`}
-            title={isCompleted ? "Mark incomplete" : "Mark complete"}
-          >
-            {isCompleted && <Check className="w-3.5 h-3.5 stroke-[2.5]" />}
-          </button>
-        ) : (
-          <div className="mt-0.5 text-amber-500">
-            <AlertCircle className="w-5 h-5" />
-          </div>
-        )}
+      {/* 1. Header Row (Status, Category, Timestamp & Always-Visible Actions) */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${categoryTheme.pillClass}`}>
+            {categoryTheme.icon}
+            <span className="capitalize">{categoryTheme.label}</span>
+          </span>
 
-        {/* Core content */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
-            {/* Category Pill */}
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium tracking-wide uppercase px-2 py-0.5 rounded-full bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
-              {getTypeIcon(item.itemType)}
-              <span>{item.itemType.replace("_", " ")}</span>
+          {/* AI Confidence / Status Badge */}
+          {isPendingReview ? (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide uppercase bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+              Needs Review {item.confidenceScore !== null ? `(${Math.round((item.confidenceScore || 0) * 100)}%)` : ""}
             </span>
+          ) : isCompleted ? (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
+              Completed
+            </span>
+          ) : null}
 
-            {/* Countdown / Context Badge */}
-            {item.badgeText && (
-              <span
-                className={`text-[11px] px-2 py-0.5 rounded-full border ${getBadgeClass(
-                  item.badgeVariant
-                )}`}
-              >
-                {item.badgeText}
-              </span>
-            )}
-
-            {/* Confidence Warning if AI review */}
-            {isPendingReview && item.confidenceScore !== null && (
-              <span className="text-[11px] text-amber-700 dark:text-amber-400 font-mono">
-                {Math.round((item.confidenceScore || 0) * 100)}% confidence
-              </span>
-            )}
-          </div>
-
-          {/* Title */}
-          <h4
-            className={`text-base font-medium leading-snug tracking-tight ${
-              isCompleted
-                ? "line-through text-[#A8A29E] dark:text-[#78716C]"
-                : "text-[#1C1917] dark:text-[#FDFBF7]"
-            }`}
-          >
-            {item.title}
-          </h4>
-
-          {/* Relation Suggestion */}
-          {item.metadata?.relationPrompt && (
-             <div className="mt-2 p-2.5 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/50 rounded-lg flex items-center justify-between gap-3 animate-in fade-in zoom-in duration-300">
-               <span className="text-xs text-blue-800 dark:text-blue-300 flex-1 leading-snug">
-                 <Sparkles className="w-3.5 h-3.5 inline mr-1" />
-                 {item.metadata.relationPrompt}
-               </span>
-               <button 
-                  onClick={() => {
-                     // We will implement relation confirmation via an event handler or API call
-                     fetch('/api/v1/relations', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                           sourceItemId: item.id,
-                           targetItemId: item.metadata?.suggestedRelationTargetId,
-                           relationshipType: "belongs_to"
-                        })
-                     }).then(() => {
-                        // Optimistically remove the prompt
-                        onEdit({ ...item, metadata: { ...item.metadata, relationPrompt: undefined } } as any);
-                     });
-                  }}
-                  className="shrink-0 px-3 py-1 bg-white dark:bg-[#1C1917] border border-blue-200 dark:border-blue-800 rounded-md text-[11px] font-semibold text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/40 transition-colors"
-               >
-                 Confirm
-               </button>
-             </div>
-          )}
-
-          {/* Extracted Details & Amounts */}
-          <div className="mt-1 flex items-center gap-3 text-xs text-[#78716C] dark:text-[#A8A29E] flex-wrap">
-            {amount !== undefined && amount !== null && (
-              <span className="font-semibold text-emerald-700 dark:text-emerald-400">
-                {currencySymbol}
-                {Number(amount).toLocaleString()}
-              </span>
-            )}
-
-            {item.metadata?.object && <span>Object: {item.metadata.object}</span>}
-            {item.metadata?.waitingFor && <span>Waiting on: {item.metadata.waitingFor}</span>}
-            {item.metadata?.location && <span>📍 {item.metadata.location}</span>}
-
-            {item.snoozedUntil && (
-              <span className="flex items-center gap-1 text-stone-500">
-                <Clock className="w-3 h-3" />
-                Snoozed until {new Date(item.snoozedUntil).toLocaleDateString()}
-              </span>
-            )}
-          </div>
+          {/* Timestamp / Date */}
+          <span className="text-[11px] text-[#A8A29E] dark:text-[#78716C] ml-1">
+            {new Date(item.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+          </span>
         </div>
 
-        {/* Actions bar */}
-        <div className="flex items-center gap-1 self-start sm:self-center ml-2">
+        {/* Right Side: Quick Action Buttons (Always Visible, Never Auto-Hidden) + Chevron */}
+        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
           {isPendingReview ? (
             <div className="flex items-center gap-1.5">
               <button
                 id={`confirm-review-${item.id}`}
-                onClick={() => onConfirmAI && onConfirmAI(item.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onConfirmAI && onConfirmAI(item.id);
+                }}
                 className="text-xs font-medium bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg transition-colors"
               >
                 Confirm
               </button>
               <button
                 id={`edit-review-${item.id}`}
-                onClick={() => onEdit(item)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit(item);
+                }}
                 className="p-1.5 text-[#78716C] hover:text-[#1C1917] dark:hover:text-white rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
                 title="Edit item"
               >
@@ -319,7 +341,10 @@ export const ItemCard: React.FC<ItemCardProps> = ({
               </button>
               <button
                 id={`delete-review-${item.id}`}
-                onClick={() => onDelete(item.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(item.id);
+                }}
                 className="p-1.5 text-stone-400 hover:text-red-600 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
                 title="Reject and delete"
               >
@@ -332,7 +357,10 @@ export const ItemCard: React.FC<ItemCardProps> = ({
               <div className="relative">
                 <button
                   id={`snooze-btn-${item.id}`}
-                  onClick={() => setShowSnoozeMenu(!showSnoozeMenu)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowSnoozeMenu(!showSnoozeMenu);
+                  }}
                   className="p-1.5 text-[#78716C] hover:text-[#1C1917] dark:hover:text-white rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
                   title="Snooze"
                 >
@@ -348,7 +376,8 @@ export const ItemCard: React.FC<ItemCardProps> = ({
                       Snooze for
                     </div>
                     <button
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         onSnooze(item.id, 1);
                         setShowSnoozeMenu(false);
                       }}
@@ -357,7 +386,8 @@ export const ItemCard: React.FC<ItemCardProps> = ({
                       +1 Day (Tomorrow)
                     </button>
                     <button
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         onSnooze(item.id, 3);
                         setShowSnoozeMenu(false);
                       }}
@@ -366,7 +396,8 @@ export const ItemCard: React.FC<ItemCardProps> = ({
                       +3 Days
                     </button>
                     <button
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         onSnooze(item.id, 7);
                         setShowSnoozeMenu(false);
                       }}
@@ -381,7 +412,10 @@ export const ItemCard: React.FC<ItemCardProps> = ({
               {/* Edit button */}
               <button
                 id={`edit-item-${item.id}`}
-                onClick={() => onEdit(item)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit(item);
+                }}
                 className="p-1.5 text-[#78716C] hover:text-[#1C1917] dark:hover:text-white rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
                 title="Edit item"
               >
@@ -391,7 +425,10 @@ export const ItemCard: React.FC<ItemCardProps> = ({
               {/* Delete button */}
               <button
                 id={`delete-item-${item.id}`}
-                onClick={() => onDelete(item.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(item.id);
+                }}
                 className="p-1.5 text-[#78716C] hover:text-red-600 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
                 title="Delete item"
               >
@@ -399,8 +436,195 @@ export const ItemCard: React.FC<ItemCardProps> = ({
               </button>
             </div>
           )}
+
+          {/* Expand / Collapse Indicator Chevron */}
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsExpanded(!isExpanded);
+            }}
+            className="p-1.5 text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+            title={isExpanded ? "Collapse" : "Expand"}
+          >
+            <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+          </div>
         </div>
       </div>
+
+      {/* 2. Main Title & Due Date Row (Compact & Essential) */}
+      <div className="flex items-start gap-3 mt-2.5">
+        {!isPendingReview ? (
+          <button
+            id={`toggle-complete-${item.id}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleComplete(item.id, !isCompleted);
+            }}
+            className={`w-5 h-5 mt-0.5 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+              isCompleted
+                ? "bg-emerald-600 border-emerald-600 text-white"
+                : "border-[#D6D3D1] dark:border-[#57534E] hover:border-[#1C1917] dark:hover:border-[#FDFBF7]"
+            }`}
+            title={isCompleted ? "Mark incomplete" : "Mark complete"}
+          >
+            {isCompleted && <Check className="w-3.5 h-3.5 stroke-[2.5]" />}
+          </button>
+        ) : (
+          <div className="mt-0.5 text-amber-500 shrink-0">
+            <AlertCircle className="w-5 h-5" />
+          </div>
+        )}
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h4
+              className={`text-base font-medium leading-snug tracking-tight ${
+                isCompleted
+                  ? "line-through text-[#A8A29E] dark:text-[#78716C]"
+                  : "text-[#1C1917] dark:text-[#FDFBF7]"
+              }`}
+            >
+              {item.title}
+            </h4>
+
+            {/* Due Date Alert Pill */}
+            {dueDatePill && (
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium shrink-0 ${dueDatePill.className}`}>
+                <Calendar className="w-3 h-3" />
+                <span>{dueDatePill.text}</span>
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Expandable Complete Information Container */}
+      {isExpanded && (
+        <div className="mt-3 pt-3 border-t border-[#F5F5F4] dark:border-[#383330] space-y-3 animate-in fade-in duration-200">
+          {/* Detailed Description / Notes */}
+          {descriptionText && (
+            <p className="text-xs sm:text-sm text-[#57534E] dark:text-[#D6D3D1] leading-relaxed font-normal">
+              {descriptionText}
+            </p>
+          )}
+
+          {/* Relation Suggestion (if pending link) */}
+          {item.metadata?.relationPrompt && (
+            <div className="p-2.5 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/50 rounded-lg flex items-center justify-between gap-3 animate-in fade-in zoom-in duration-300">
+              <span className="text-xs text-blue-800 dark:text-blue-300 flex-1 leading-snug">
+                <Sparkles className="w-3.5 h-3.5 inline mr-1" />
+                {item.metadata.relationPrompt}
+              </span>
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  fetch('/api/v1/relations', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      sourceItemId: item.id,
+                      targetItemId: item.metadata?.suggestedRelationTargetId,
+                      relationshipType: "belongs_to"
+                    })
+                  }).then(() => {
+                    onEdit({ ...item, metadata: { ...item.metadata, relationPrompt: undefined } } as any);
+                  });
+                }}
+                className="shrink-0 px-3 py-1 bg-white dark:bg-[#1C1917] border border-blue-200 dark:border-blue-800 rounded-md text-[11px] font-semibold text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/40 transition-colors"
+              >
+                Confirm
+              </button>
+            </div>
+          )}
+
+          {/* Key-Value Structured Metadata Grid */}
+          {hasStructuredFields && (
+            <div className="pt-2 border-t border-[#F5F5F4] dark:border-[#383330] grid grid-cols-2 gap-2">
+              {amount !== undefined && amount !== null && (
+                <div>
+                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#A8A29E]">Amount Due</span>
+                  <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                    {currencySymbol}{Number(amount).toLocaleString()}
+                  </p>
+                </div>
+              )}
+              {item.dueDate && (
+                <div>
+                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#A8A29E]">Deadline</span>
+                  <p className={`text-xs font-medium ${item.badgeVariant === "urgent" ? "text-rose-600 dark:text-rose-400" : "text-[#292524] dark:text-[#E7E5E4]"}`}>
+                    {new Date(item.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                  </p>
+                </div>
+              )}
+              {policyNumber && (
+                <div>
+                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#A8A29E]">Policy #</span>
+                  <p className="text-xs font-medium text-[#292524] dark:text-[#E7E5E4] truncate">{policyNumber}</p>
+                </div>
+              )}
+              {vin && (
+                <div>
+                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#A8A29E]">VIN / Asset #</span>
+                  <p className="text-xs font-medium text-[#292524] dark:text-[#E7E5E4] truncate">{vin}</p>
+                </div>
+              )}
+              {location && (
+                <div>
+                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#A8A29E]">Location</span>
+                  <p className="text-xs font-medium text-[#292524] dark:text-[#E7E5E4] truncate">{location}</p>
+                </div>
+              )}
+              {item.snoozedUntil && (
+                <div>
+                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#A8A29E]">Snoozed Until</span>
+                  <p className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E] flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    {new Date(item.snoozedUntil).toLocaleDateString()}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Footer Row: Tags, Family Sharing & Attachment */}
+          <div className="pt-2 border-t border-[#F5F5F4] dark:border-[#383330] flex items-center justify-between gap-2 text-xs flex-wrap">
+            <div className="flex flex-wrap gap-1.5 items-center">
+              {tags.map((tag: string, idx: number) => (
+                <span key={idx} className="px-2 py-0.5 rounded-md bg-[#F5F5F4] dark:bg-[#1C1917] text-[#78716C] dark:text-[#A8A29E] text-[11px] font-normal">
+                  #{tag.replace(/^#/, '')}
+                </span>
+              ))}
+              {tags.length === 0 && (
+                <span className="px-2 py-0.5 rounded-md bg-[#F5F5F4] dark:bg-[#1C1917] text-[#78716C] dark:text-[#A8A29E] text-[11px] font-normal">
+                  #{item.itemType}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {isFamilyShared && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-full">
+                  <Users className="w-3 h-3" />
+                  Family
+                </span>
+              )}
+              {item.metadata?.fileUrl && (
+                <a 
+                  href={item.metadata.fileUrl} 
+                  target="_blank" 
+                  rel="noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex items-center gap-1 text-[11px] text-[#78716C] hover:text-[#1C1917] dark:hover:text-white underline-offset-2 hover:underline"
+                >
+                  <Paperclip className="w-3 h-3" />
+                  <span>Attachment</span>
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
-}
+};
+
