@@ -127,15 +127,15 @@ export function groupItemsIntoTimeline(
       continue;
     }
 
-    // 2. Active / Pending Waiting-For candidate
-    if (item.itemType === "waiting_for" || item.metadata?.isWaitingFor === true || item.metadata?.waitingFor) {
-      result.waitingFor.push(item);
+    // 2. Needs attention (unreviewed AI)
+    if (item.status === "pending_review") {
+      result.needsAttention.push(item);
       continue;
     }
 
-    // 3. Needs attention (unreviewed AI)
-    if (item.status === "pending_review") {
-      result.needsAttention.push(item);
+    // 3. Active / Confirmed Waiting-For candidate
+    if (item.itemType === "waiting_for" || item.metadata?.isWaitingFor === true || item.metadata?.waitingFor) {
+      result.waitingFor.push(item);
       continue;
     }
 
@@ -150,9 +150,8 @@ export function groupItemsIntoTimeline(
     const days = getDaysDifference(target, referenceDate);
 
     if (days < 0) {
-      // Overdue items demand attention!
+      // Overdue items demand attention! Exactly one bucket per view
       result.needsAttention.push(item);
-      result.past.push(item);
     } else if (days === 0) {
       result.today.push(item);
     } else if (days === 1) {
