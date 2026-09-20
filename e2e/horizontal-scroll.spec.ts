@@ -247,7 +247,7 @@ test.describe('Horizontal Scrolling & Overflow Audit', () => {
     });
   }
 
-  test('Search input keeps value and focus across breakpoint changes (390 -> 834 -> 1024)', async ({ page }) => {
+  test('Search input keeps value and focus across breakpoint changes (390 -> 834 -> 1024 -> 852x393 and back)', async ({ page }) => {
     // Start at compact mobile (390x844)
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/');
@@ -255,22 +255,33 @@ test.describe('Horizontal Scrolling & Overflow Audit', () => {
 
     // Focus and type text
     await page.fill('#search-input', 'battery refund');
-    await expect(page.locator('#search-input')).toHaveValue('battery refund');
-    await expect(page.locator('#search-input')).toBeFocused();
 
-    // Resize to tablet rail (834x1194)
-    await page.setViewportSize({ width: 834, height: 1194 });
-    await page.waitForTimeout(300);
-    await expect(page.locator('#search-input')).toBeVisible();
-    await expect(page.locator('#search-input')).toHaveValue('battery refund');
-    await expect(page.locator('#search-input')).toBeFocused();
+    // Tag the element with data-probe to prove it is the exact same DOM node
+    await page.evaluate(() => {
+      document.getElementById('search-input')?.setAttribute('data-probe', 'search-probe-verified');
+    });
 
-    // Resize to desktop / tablet landscape sidebar (1024x768)
-    await page.setViewportSize({ width: 1024, height: 768 });
-    await page.waitForTimeout(300);
-    await expect(page.locator('#search-input')).toBeVisible();
-    await expect(page.locator('#search-input')).toHaveValue('battery refund');
-    await expect(page.locator('#search-input')).toBeFocused();
+    const searchInput = page.locator('#search-input');
+    await expect(searchInput).toHaveValue('battery refund');
+    await expect(searchInput).toBeFocused();
+    await expect(searchInput).toHaveAttribute('data-probe', 'search-probe-verified');
+
+    // Resize sequence: 390 -> 834 -> 1024 -> 852x393 -> back to 390
+    const resizeSequence = [
+      { width: 834, height: 1194, name: '834x1194 tablet rail' },
+      { width: 1024, height: 768, name: '1024x768 desktop sidebar' },
+      { width: 852, height: 393, name: '852x393 landscape phone' },
+      { width: 390, height: 844, name: '390x844 mobile phone' },
+    ];
+
+    for (const step of resizeSequence) {
+      await page.setViewportSize({ width: step.width, height: step.height });
+      await page.waitForTimeout(250);
+      await expect(searchInput).toBeVisible();
+      await expect(searchInput).toHaveValue('battery refund');
+      await expect(searchInput).toBeFocused();
+      await expect(searchInput).toHaveAttribute('data-probe', 'search-probe-verified');
+    }
   });
 
   test('Rail navigation is reachable and scrollable at short heights (834x500 and 700x510)', async ({ page }) => {
