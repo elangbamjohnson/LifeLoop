@@ -12,7 +12,19 @@ export function CaptureDialog({ isOpen, onClose, onSubmit }: CaptureDialogProps)
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -21,6 +33,7 @@ export function CaptureDialog({ isOpen, onClose, onSubmit }: CaptureDialogProps)
     if (!text && !file) return;
 
     setLoading(true);
+    setErrorMessage(null);
     try {
       if (activeTab === "text" && text) {
         await onSubmit({ type: "text", payload: text });
@@ -37,7 +50,7 @@ export function CaptureDialog({ isOpen, onClose, onSubmit }: CaptureDialogProps)
       onClose();
     } catch (error) {
       console.error("Submit error", error);
-      alert("Failed to save capture");
+      setErrorMessage("Failed to save capture. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -83,6 +96,15 @@ export function CaptureDialog({ isOpen, onClose, onSubmit }: CaptureDialogProps)
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {errorMessage && (
+          <div role="alert" className="mx-4 mt-3 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs rounded-xl flex items-center justify-between">
+            <span>{errorMessage}</span>
+            <button type="button" onClick={() => setErrorMessage(null)} className="text-rose-500 hover:text-rose-700 p-1">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="p-6">
           {activeTab === "text" ? (

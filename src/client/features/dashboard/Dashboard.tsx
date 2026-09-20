@@ -32,6 +32,7 @@ import { LifeGraphView } from "./LifeGraphView";
 import { EntityDetailView } from "./EntityDetailView";
 import { groupItemsIntoTimeline, TimelineItem, TimelineGrouping } from "../../../shared/utils/timeline";
 import { FamilyPage } from "../family/FamilyPage";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 
 interface Capture {
   id: string;
@@ -57,6 +58,19 @@ export function Dashboard() {
   const [editingItem, setEditingItem] = useState<TimelineItem | null>(null);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    description?: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    variant?: "danger" | "warning" | "info";
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: "",
+    onConfirm: () => {},
+  });
 
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const moreSheetRef = useRef<HTMLDivElement>(null);
@@ -210,15 +224,24 @@ export function Dashboard() {
   };
 
   // Delete item
-  const handleDeleteItem = async (id: string) => {
-    if (!confirm("Delete this life item?")) return;
-    try {
-      await fetch(`/api/v1/items/${id}`, { method: "DELETE" });
-      setItems((prev) => prev.filter((i) => i.id !== id));
-      showToast("Item deleted");
-    } catch (err) {
-      console.error(err);
-    }
+  const handleDeleteItem = (id: string) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: "Delete this life item?",
+      description: "This item will be permanently removed from your LifeLoop.",
+      confirmLabel: "Delete Item",
+      variant: "danger",
+      onConfirm: async () => {
+        setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+        try {
+          await fetch(`/api/v1/items/${id}`, { method: "DELETE" });
+          setItems((prev) => prev.filter((i) => i.id !== id));
+          showToast("Item deleted");
+        } catch (err) {
+          console.error(err);
+        }
+      },
+    });
   };
 
   // Save edited item
@@ -240,17 +263,26 @@ export function Dashboard() {
     }
   };
 
-  const handleDeleteCapture = async (id: string) => {
-    if (!confirm("Delete this capture?")) return;
-    try {
-      const res = await fetch(`/api/v1/captures/${id}`, { method: "DELETE" });
-      if (res.ok) {
-        setCaptures((prev) => prev.filter((c) => c.id !== id));
-        showToast("Capture deleted");
-      }
-    } catch (err) {
-      console.error(err);
-    }
+  const handleDeleteCapture = (id: string) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: "Delete this capture?",
+      description: "Original raw capture and extracted data will be removed.",
+      confirmLabel: "Delete Capture",
+      variant: "danger",
+      onConfirm: async () => {
+        setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+        try {
+          const res = await fetch(`/api/v1/captures/${id}`, { method: "DELETE" });
+          if (res.ok) {
+            setCaptures((prev) => prev.filter((c) => c.id !== id));
+            showToast("Capture deleted");
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      },
+    });
   };
 
   const getStatusIcon = (status: string) => {
@@ -1338,6 +1370,17 @@ export function Dashboard() {
           onSave={handleSaveItemEdit}
         />
       )}
+
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        description={confirmDialog.description}
+        confirmLabel={confirmDialog.confirmLabel}
+        cancelLabel={confirmDialog.cancelLabel}
+        variant={confirmDialog.variant}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog((prev) => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }
