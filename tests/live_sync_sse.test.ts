@@ -133,7 +133,6 @@ describe('Live Sync SSE Route & EventBus - Integration Tests', () => {
       expect(res.headers['cache-control']).toBe('no-cache, no-transform');
       expect(res.headers['connection']).toBe('keep-alive');
       expect(res.headers['x-accel-buffering']).toBe('no');
-      expect(res.headers['content-encoding']).toBe('identity');
 
       const msg = await waitForMessage((m) => m.includes(': connected'));
       expect(msg).toContain(': connected');
@@ -324,34 +323,41 @@ describe('Live Sync SSE Route & EventBus - Integration Tests', () => {
     expect(eventBus.getConnectionCount(userAId)).toBe(0);
   });
 
-  it('8. Caps at 5 SSE streams per user; 6th open closes the 1st', async () => {
+  it('8. Caps at 10 SSE streams per user; 11th open closes the 1st with event: replaced', async () => {
     const connections: Array<Awaited<ReturnType<typeof connectSSE>>> = [];
 
     try {
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 10; i++) {
         const conn = await connectSSE(authCookieA);
         await conn.waitForMessage((m) => m.includes(': connected'));
         connections.push(conn);
       }
 
-      expect(eventBus.getConnectionCount(userAId)).toBe(5);
+      expect(eventBus.getConnectionCount(userAId)).toBe(10);
 
-      // Track if 1st connection ends or receives replacement comment
+      // Track if 1st connection ends or receives replacement event
       let firstConnEnded = false;
+      let receivedReplacedEvent = false;
+      connections[0].res.on('data', (chunk: string) => {
+        if (chunk.includes('event: replaced')) {
+          receivedReplacedEvent = true;
+        }
+      });
       connections[0].res.on('end', () => {
         firstConnEnded = true;
       });
 
-      // Open 6th connection
-      const sixthConn = await connectSSE(authCookieA);
-      await sixthConn.waitForMessage((m) => m.includes(': connected'));
-      connections.push(sixthConn);
+      // Open 11th connection
+      const eleventhConn = await connectSSE(authCookieA);
+      await eleventhConn.waitForMessage((m) => m.includes(': connected'));
+      connections.push(eleventhConn);
 
       // Allow event loop to process
-      await new Promise((r) => setTimeout(r, 150));
+      await new Promise((r) => setTimeout(r, 200));
 
+      expect(receivedReplacedEvent).toBe(true);
       expect(firstConnEnded).toBe(true);
-      expect(eventBus.getConnectionCount(userAId)).toBeLessThanOrEqual(5);
+      expect(eventBus.getConnectionCount(userAId)).toBeLessThanOrEqual(10);
     } finally {
       for (const conn of connections) {
         conn.close();

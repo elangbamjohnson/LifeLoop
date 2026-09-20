@@ -58,6 +58,7 @@ export default defineConfig({
     timeout: 60000,
     env: {
       NODE_ENV: 'test',
+      LOG_LEVEL: 'warn',
       AI_PROVIDER: 'mock',
       DISABLE_RATE_LIMIT: '1',
       TEST_SCHEMA: 'lifeloop_test_e2e',

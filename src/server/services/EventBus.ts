@@ -15,7 +15,7 @@ export interface EventBusInterface {
   getConnectionCount(userId?: string): number;
 }
 
-const MAX_CONNECTIONS_PER_USER = 5;
+const MAX_CONNECTIONS_PER_USER = 10;
 
 export class InMemoryEventBus implements EventBusInterface {
   // Map of userId -> Set of Response objects
@@ -52,7 +52,7 @@ export class InMemoryEventBus implements EventBusInterface {
       const oldest = userStreams.values().next().value;
       if (oldest) {
         try {
-          oldest.write(': stream replaced\n\n');
+          oldest.write('event: replaced\ndata: {}\n\n');
           oldest.end();
         } catch (_) {
           // ignore

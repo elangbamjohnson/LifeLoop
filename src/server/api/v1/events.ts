@@ -6,6 +6,7 @@ export const eventsRouter = Router();
 
 eventsRouter.get('/', requireAuth, (req: AuthenticatedRequest, res: Response) => {
   const userId = req.userId!;
+  (req as any).log?.debug({ userId }, 'SSE client connected');
 
   // SSE headers
   res.writeHead(200, {
@@ -13,7 +14,6 @@ eventsRouter.get('/', requireAuth, (req: AuthenticatedRequest, res: Response) =>
     'Cache-Control': 'no-cache, no-transform',
     'Connection': 'keep-alive',
     'X-Accel-Buffering': 'no',
-    'Content-Encoding': 'identity',
   });
 
   // Flush headers immediately and inform client of connection
@@ -40,6 +40,7 @@ eventsRouter.get('/', requireAuth, (req: AuthenticatedRequest, res: Response) =>
   const cleanup = () => {
     if (cleanedUp) return;
     cleanedUp = true;
+    (req as any).log?.debug({ userId }, 'SSE client disconnected');
     clearInterval(pingInterval);
     eventBus.unsubscribe(userId, res);
   };

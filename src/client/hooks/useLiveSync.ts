@@ -162,12 +162,27 @@ export function useLiveSync({
       triggerSyncDebounced();
     };
 
+    es.addEventListener('replaced', () => {
+      // Replaced due to stream cap on server:
+      // Stay closed for 60s with fallback polling, then retry
+      closeEventSource();
+      startFallbackPolling();
+      if (!retryTimeoutRef.current) {
+        retryTimeoutRef.current = setTimeout(() => {
+          retryTimeoutRef.current = null;
+          if (isMountedRef.current && !stoppedRef.current) {
+            connect();
+          }
+        }, 60000);
+      }
+    });
+
     es.onerror = (err: Event) => {
       if (!isMountedRef.current || stoppedRef.current) return;
 
-      // Check if this error represents a 401 Unauthorized
-      const status = (err as any)?.status || (es as any)?.status;
-      if (status === 401 || status === 403) {
+      // Check if this error object directly provides a 401/403 status (e.g. in test environments)
+      const directStatus = (err as any)?.status || (es as any)?.status;
+      if (directStatus === 401 || directStatus === 403) {
         handleAuthFailure();
         return;
       }
@@ -175,22 +190,19 @@ export function useLiveSync({
       consecutiveErrorsRef.current += 1;
       setIsConnected(false);
 
-      // In browser EventSource, 401 doesn't expose HTTP status on err,
-      // so verify auth if error persists
-      if (consecutiveErrorsRef.current === 1) {
-        fetch('/api/v1/auth/me')
-          .then((res) => {
-            if (res.status === 401 || res.status === 403) {
-              handleAuthFailure();
-            }
-          })
-          .catch(() => {});
-      }
-
-      // After 3 consecutive errors, fall back to polling and schedule SSE retry
       if (consecutiveErrorsRef.current >= 3) {
         closeEventSource();
         startFallbackPolling();
+        if (retryTimeoutRef.current) {
+          clearTimeout(retryTimeoutRef.current);
+          retryTimeoutRef.current = null;
+        }
+      }
+
+      const scheduleRetry = () => {
+        const backoffDelay = consecutiveErrorsRef.current >= 3
+          ? 60000
+          : Math.min(1000 * Math.pow(2, consecutiveErrorsRef.current - 1), 60000);
 
         if (!retryTimeoutRef.current) {
           retryTimeoutRef.current = setTimeout(() => {
@@ -198,8 +210,25 @@ export function useLiveSync({
             if (isMountedRef.current && !stoppedRef.current) {
               connect();
             }
-          }, 60000);
+          }, backoffDelay);
         }
+      };
+
+      scheduleRetry();
+
+      // In standard browsers EventSource onerror carries no status code,
+      // so call /api/v1/auth/me to check if session expired
+      if (typeof fetch === 'function') {
+        fetch('/api/v1/auth/me')
+          .then((res) => {
+            if (!isMountedRef.current || stoppedRef.current) return;
+            if (res.status === 401 || res.status === 403) {
+              handleAuthFailure();
+            }
+          })
+          .catch(() => {
+            // Network error / offline, retry is already scheduled
+          });
       }
     };
   }, [

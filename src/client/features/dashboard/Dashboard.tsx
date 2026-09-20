@@ -207,14 +207,37 @@ export function Dashboard() {
 
   const tabId = useRef(getTabClientId()).current;
   const lastFetchTimeRef = useRef(0);
+  const trailingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const deduplicatedRefetch = useCallback(() => {
     const now = Date.now();
-    if (now - lastFetchTimeRef.current < 1000) {
-      return;
+    const elapsed = now - lastFetchTimeRef.current;
+
+    if (elapsed >= 1000) {
+      if (trailingTimerRef.current !== null) {
+        clearTimeout(trailingTimerRef.current);
+        trailingTimerRef.current = null;
+      }
+      lastFetchTimeRef.current = now;
+      fetchData();
+    } else if (trailingTimerRef.current === null) {
+      const remaining = 1000 - elapsed;
+      trailingTimerRef.current = setTimeout(() => {
+        trailingTimerRef.current = null;
+        lastFetchTimeRef.current = Date.now();
+        fetchData();
+      }, remaining);
     }
-    lastFetchTimeRef.current = now;
-    fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    return () => {
+      if (trailingTimerRef.current !== null) {
+        clearTimeout(trailingTimerRef.current);
+        trailingTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useLiveSync({
     enabled: Boolean(user),
