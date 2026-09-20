@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Mic, Camera, FileUp, Type, X, Send } from "lucide-react";
 
 interface CaptureDialogProps {
@@ -12,7 +12,33 @@ export function CaptureDialog({ isOpen, onClose, onSubmit }: CaptureDialogProps)
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const previousActiveElement = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    previousActiveElement.current = document.activeElement as HTMLElement;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      setTimeout(() => {
+        if (previousActiveElement.current && previousActiveElement.current !== document.body) {
+          previousActiveElement.current.focus();
+        } else {
+          document.getElementById("global-capture-btn")?.focus();
+        }
+      }, 50);
+    };
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -21,6 +47,7 @@ export function CaptureDialog({ isOpen, onClose, onSubmit }: CaptureDialogProps)
     if (!text && !file) return;
 
     setLoading(true);
+    setErrorMessage(null);
     try {
       if (activeTab === "text" && text) {
         await onSubmit({ type: "text", payload: text });
@@ -37,7 +64,7 @@ export function CaptureDialog({ isOpen, onClose, onSubmit }: CaptureDialogProps)
       onClose();
     } catch (error) {
       console.error("Submit error", error);
-      alert("Failed to save capture");
+      setErrorMessage("Failed to save capture. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -50,26 +77,35 @@ export function CaptureDialog({ isOpen, onClose, onSubmit }: CaptureDialogProps)
         onClick={onClose}
       />
       
-      <div className="relative w-full max-w-lg bg-[#FDFBF7] dark:bg-[#1C1917] rounded-3xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 sm:slide-in-from-bottom-8 duration-300">
+      <div
+        id="capture-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="capture-dialog-title"
+        className="relative w-full max-w-lg bg-[#FDFBF7] dark:bg-[#1C1917] rounded-3xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 sm:slide-in-from-bottom-8 duration-300"
+      >
+        <h2 id="capture-dialog-title" className="sr-only">Capture to LifeLoop</h2>
         <div className="flex items-center justify-between p-4 border-b border-[#E7E5E4] dark:border-[#292524]">
           <div className="flex gap-2 p-1 bg-[#E7E5E4]/50 dark:bg-[#292524] rounded-xl">
             <button
+              type="button"
               onClick={() => setActiveTab("text")}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+              className={`touch-target-48 min-h-[48px] px-4 py-2 text-sm font-medium rounded-xl transition-all flex items-center ${
                 activeTab === "text" 
-                  ? "bg-white dark:bg-[#44403C] text-black dark:text-white shadow-sm" 
-                  : "text-[#78716C] hover:text-black dark:hover:text-white"
+                  ? "bg-white dark:bg-[#44403C] text-black dark:text-white shadow-xs" 
+                  : "text-[#57534E] dark:text-[#D6D3D1] hover:text-black dark:hover:text-white"
               }`}
             >
               <Type className="w-4 h-4 inline-block mr-2" />
               Text
             </button>
             <button
+              type="button"
               onClick={() => setActiveTab("media")}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+              className={`touch-target-48 min-h-[48px] px-4 py-2 text-sm font-medium rounded-xl transition-all flex items-center ${
                 activeTab === "media" 
-                  ? "bg-white dark:bg-[#44403C] text-black dark:text-white shadow-sm" 
-                  : "text-[#78716C] hover:text-black dark:hover:text-white"
+                  ? "bg-white dark:bg-[#44403C] text-black dark:text-white shadow-xs" 
+                  : "text-[#57534E] dark:text-[#D6D3D1] hover:text-black dark:hover:text-white"
               }`}
             >
               <Camera className="w-4 h-4 inline-block mr-2" />
@@ -77,12 +113,25 @@ export function CaptureDialog({ isOpen, onClose, onSubmit }: CaptureDialogProps)
             </button>
           </div>
           <button 
+            id="close-capture-btn"
+            type="button"
             onClick={onClose}
-            className="p-2 text-[#78716C] hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-colors"
+            className="touch-target-48 min-w-[48px] min-h-[48px] flex items-center justify-center p-2 text-[#78716C] hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400"
+            title="Close"
+            aria-label="Close capture dialog"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {errorMessage && (
+          <div role="alert" className="mx-4 mt-3 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs rounded-xl flex items-center justify-between">
+            <span>{errorMessage}</span>
+            <button type="button" onClick={() => setErrorMessage(null)} className="text-rose-500 hover:text-rose-700 p-1">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="p-6">
           {activeTab === "text" ? (
@@ -135,7 +184,7 @@ export function CaptureDialog({ isOpen, onClose, onSubmit }: CaptureDialogProps)
             <button
               type="submit"
               disabled={loading || (activeTab === "text" && !text) || (activeTab === "media" && !file)}
-              className="flex items-center gap-2 bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] px-6 py-3 rounded-full font-medium hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100"
+              className="touch-target-48 min-h-[48px] flex items-center justify-center gap-2 bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] px-6 py-3 rounded-full font-medium hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400"
             >
               {loading ? (
                 <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />

@@ -245,14 +245,14 @@ export class ReminderService {
   /**
    * Snoozes an item (and adjusts its reminders).
    */
-  async snoozeItem(itemId: string, snoozeUntil: Date) {
+  async snoozeItem(itemId: string, userId: string, snoozeUntil: Date) {
     const [updatedItem] = await db
       .update(items)
       .set({
         snoozedUntil: snoozeUntil,
         status: "snoozed",
       })
-      .where(eq(items.id, itemId))
+      .where(and(eq(items.id, itemId), eq(items.userId, userId)))
       .returning();
 
     return updatedItem;
@@ -261,15 +261,17 @@ export class ReminderService {
   /**
    * Completes an item and marks all associated reminders as dismissed.
    */
-  async completeItem(itemId: string, completed: boolean = true) {
+  async completeItem(itemId: string, userId: string, completed: boolean = true) {
     const [updatedItem] = await db
       .update(items)
       .set({
         status: completed ? "completed" : "active",
         completedAt: completed ? new Date() : null,
       })
-      .where(eq(items.id, itemId))
+      .where(and(eq(items.id, itemId), eq(items.userId, userId)))
       .returning();
+
+    if (!updatedItem) return undefined;
 
     if (completed) {
       await db

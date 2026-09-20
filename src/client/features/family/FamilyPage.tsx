@@ -7,6 +7,7 @@ import { CreateFamilyModal } from "./CreateFamilyModal";
 import { InviteMemberModal } from "./InviteMemberModal";
 import { ShareItemModal } from "./ShareItemModal";
 import { FamilyNotifications } from "./FamilyNotifications";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 
 interface Family {
   id: string;
@@ -70,6 +71,17 @@ export function FamilyPage() {
   const [showInvite, setShowInvite] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    description?: string;
+    confirmLabel?: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: "",
+    onConfirm: () => {},
+  });
 
   const selectedFamily = families.find((f) => f.id === selectedFamilyId) ?? null;
 
@@ -116,11 +128,19 @@ export function FamilyPage() {
   useEffect(() => { fetchFamilies(); fetchUnreadCount(); }, []);
   useEffect(() => { if (selectedFamilyId) fetchFamilyDetails(selectedFamilyId); }, [selectedFamilyId]);
 
-  const handleRemoveMember = async (memberId: string) => {
+  const handleRemoveMember = (memberId: string) => {
     if (!selectedFamilyId) return;
-    if (!window.confirm("Remove this member from the family?")) return;
-    await fetch(`/api/v1/families/${selectedFamilyId}/members/${memberId}`, { method: "DELETE" });
-    fetchFamilyDetails(selectedFamilyId);
+    setConfirmDialog({
+      isOpen: true,
+      title: "Remove this member from the family?",
+      description: "They will no longer have access to family shared items and reminders.",
+      confirmLabel: "Remove Member",
+      onConfirm: async () => {
+        setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+        await fetch(`/api/v1/families/${selectedFamilyId}/members/${memberId}`, { method: "DELETE" });
+        fetchFamilyDetails(selectedFamilyId);
+      },
+    });
   };
 
   const handleUnshare = async (sharedItemId: string) => {
@@ -401,6 +421,16 @@ export function FamilyPage() {
           onShared={() => fetchFamilyDetails(selectedFamilyId!)}
         />
       )}
+
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        description={confirmDialog.description}
+        confirmLabel={confirmDialog.confirmLabel}
+        variant="danger"
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog((prev) => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }

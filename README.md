@@ -1,117 +1,104 @@
-# LifeLoop — Personal Life Operating System
+# LifeLoop
 
-> "Never forget what matters."
+A personal life-management app: capture thoughts, AI-classifies them into actionable items, reminders, and waiting-for items.
 
-LifeLoop is an intelligent "life admin" system that captures information and converts it into useful, structured context. It acts as a personal memory and obligation layer, following the core loop: **CAPTURE → UNDERSTAND → STRUCTURE → REMEMBER → REMIND → EVENTUALLY ACT**.
+---
 
-## 1. Project Architecture
+## Prerequisites
 
-The MVP is built as a **Modular Monolith** prioritizing code separation, security, and future portability to native mobile platforms.
+- **Node.js** >= 20
+- **PostgreSQL** running locally on `127.0.0.1:5433` (for tests)
+- A **Neon** (or compatible Postgres) database for development/production
 
-- **Frontend (Web MVP)**: React 19 + TypeScript + Vite + Tailwind CSS. Designed to be strictly presentation-focused, allowing easy translation to React Native or Flutter in the future.
-- **Backend**: Node.js + Express + TypeScript.
-- **Database**: PostgreSQL (relational core with JSONB for flexible metadata).
+---
 
-## 2. Repository Structure
+## Environment Variables
 
-```text
-/src
-  /client               # Frontend React Application
-    /components         # Reusable UI elements (Buttons, Inputs)
-    /features           # Feature-based modules (Capture, Dashboard, Items)
-    /hooks              # Custom React hooks
-    /services           # API client and external interactions
-    /types              # Shared frontend types
-  /server               # Backend Express Application
-    /api                # Express routes and controllers
-    /services           # Core business logic (AI parsing, scheduling)
-    /db                 # Database connections, schema, and migrations
-    /providers          # External provider abstractions (AI, Auth)
-  /shared               # Shared code between client and server
-    /types              # Domain models, API contracts (Zod schemas)
-    /constants          # System-wide constants
+Copy `.env.example` to `.env` and fill in the values:
+
+```env
+DATABASE_URL="postgresql://user:pass@host/db?sslmode=require"
+JWT_SECRET="your-secret-here"
+GEMINI_API_KEY="your-gemini-api-key"
+PORT=64532
+# HOST=127.0.0.1   (see HOST section below)
 ```
 
-## 3. Database Schema
+### HOST — Bind Address
 
-The core schema utilizes a stable relational model enhanced with JSONB for dynamic metadata.
+| Value       | When to use |
+| :---------- | :--- |
+| (unset)     | Default for dev/test. Binds to 127.0.0.1 (loopback). Only the local machine can reach it. |
+| 127.0.0.1   | Explicit loopback. Same as unset for dev/test. |
+| 0.0.0.0     | All interfaces. Used automatically in production (Cloud Run, Render, etc.). |
 
-- **`users`**: `id`, `email`, `password_hash`, `created_at`, `settings`
-- **`captures`**: `id`, `user_id`, `type` (text, image, audio), `raw_payload`, `status` (pending, processed, failed), `created_at`
-- **`items`**: `id`, `user_id`, `type` (task, event, bill, document, person), `title`, `description`, `status`, `metadata` (JSONB)
-- **`dates_and_reminders`**: `id`, `item_id`, `date_type` (due_date, reminder, renewal), `timestamp`, `is_resolved`
-- **`relationships`**: `source_item_id`, `target_item_id`, `relation_type` (e.g., "warranty_for", "parent_of")
-- **`ai_extractions`**: `id`, `capture_id`, `extracted_data` (JSONB), `provider_used`, `confidence_score`
+WARNING: Never set HOST=0.0.0.0 locally unless you intentionally want the server
+reachable from other devices on your network. Do not commit HOST=0.0.0.0 to .env.
 
-## 4. API Boundaries
+Both server.ts (Express) and vite.config.ts (Vite dev server + HMR socket) read HOST:
 
-Strict REST API contracts separating UI from business logic.
+  // server.ts
+  const host = process.env.HOST ?? (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
+  const server = app.listen(PORT, host, () => { ... });
 
-- **Auth**: `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`
-- **Captures**:
-  - `POST /api/v1/captures` (Submit new raw data)
-  - `GET /api/v1/captures/:id/status` (Poll for processing status)
-- **Dashboard**:
-  - `GET /api/v1/home` (Aggregates "Needs Attention", "Upcoming", "Waiting For")
-- **Items**:
-  - `GET /api/v1/items`
-  - `PATCH /api/v1/items/:id` (Update status/metadata)
-  - `DELETE /api/v1/items/:id`
+  // vite.config.ts
+  const host = process.env.HOST ?? (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
+  server: { host, hmr: { host, port: hmrPort } }
 
-## 5. Authentication Strategy
+---
 
-- **Mechanism**: HTTP-only, secure, SameSite cookies carrying a JWT or opaque session token.
-- **Data Isolation**: Every database query must strictly filter by `user_id` injected from the authenticated session middleware. No exceptions.
-- **Security**: Passwords hashed with bcrypt/Argon2. Secrets managed exclusively via environment variables.
+## Development
 
-## 6. AI Provider Abstraction
+  npm install
+  npm run dev          # starts on http://127.0.0.1:64532 by default
+  npm run check        # runs TypeScript typechecking
 
-The AI acts strictly as an intelligence layer. Business logic relies on structured outputs, not raw text.
+---
 
-```typescript
-// /src/server/providers/ai/AIProvider.ts
-export interface AIProvider {
-  /** Classifies raw capture into an intent/domain */
-  classifyIntent(input: string): Promise<IntentClassification>;
-  
-  /** Extracts structured entities (dates, amounts, people) */
-  extractEntities(input: string, schema: ValidationSchema): Promise<StructuredData>;
-}
-```
-*Current Implementation*: `GeminiProvider` using `@google/genai`. Responses are validated using strict Zod schemas before hitting the database.
+## Testing
 
-## 7. Phase 0 and 1 Implementation Plan
+### Unit / Integration (Vitest)
 
-### Phase 0 — Foundation
-*Objective: A stable, secure, deployable empty shell.*
-1. Setup Express backend and Vite Vite React frontend serving concurrently.
-2. Configure PostgreSQL connection and define base schema (Users).
-3. Implement secure authentication (Login/Register) with HTTP-only cookies.
-4. Establish API routing and error handling middleware.
-5. Create empty standard layouts (Navigation, Mobile-first shell).
+Requires local Postgres on 127.0.0.1:5433 with database lifeloop_test_db.
 
-### Phase 1 — Capture
-*Objective: The user can input text, and the system securely stores it.*
-1. Build the primary floating **+ Capture** UI.
-2. Implement `POST /api/v1/captures` to store raw text input in the database.
-3. Build a simple "Inbox/History" view to show raw captures (pre-AI processing).
-4. *Note: AI entity extraction is intentionally deferred to Phase 2.*
+  pg_isready -h 127.0.0.1 -p 5433
+  npx vitest run
+  npx vitest run --sequence.seed=12345
 
-## 8. Technical Risks
+Tests load .env.test only and never touch the Neon/production database.
 
-1. **AI Non-Determinism**: LLMs may format dates incorrectly or hallucinate entities. *Mitigation: Strict schema validation (e.g., Zod) on all AI outputs; fallback to manual human review if confidence is low.*
-2. **Data Privacy**: Accidentally logging PII or sending sensitive data to unauthorized third parties. *Mitigation: Strict audit of logging mechanisms; zero logging of `raw_payload` or `extracted_data` in application logs.*
-3. **Cross-User Leakage**: *Mitigation: Mandatory `user_id` scoping at the data-access layer; robust test coverage asserting unauthorized access fails.*
+### E2E (Playwright)
 
-## 9. Decisions Postponed
+Playwright manages its own server lifecycle — starts before the run, stops after (even on failure).
 
-1. **Native Mobile Frameworks**: We will use a responsive Web UI for the MVP to validate the architecture before committing to React Native or Flutter.
-2. **End-to-End Encryption (E2E)**: Complex key management is deferred. MVP will rely on robust TLS in transit and standard Cloud provider at-rest encryption, with row-level security.
-3. **Multi-Modal Capture**: Image, PDF, and Voice processing are deferred. We will start strictly with unstructured text.
-## 10. Phase 6 - Connected Life Context
+  npx playwright test
+  npx playwright test --project=mobile-webkit
 
-*Objective: Turn isolated items into connected, contextual graphs (e.g. A Car entity connected to its Insurance, Registration, and Repairs).*
-1.  **Item Relations Schema:** Added `item_relations` table connecting `sourceItemId` and `targetItemId`.
-2.  **AI Relation Suggestion:** The `AIProvider` automatically cross-references new captures against known entities (`vehicle`, `home`, `person`, `subscription`) and suggests connections.
-3.  **Entity View:** A dedicated **Entities (Life Graph)** dashboard tab provides top-level access to context hubs.
-4.  **Confirm Flow:** Users explicitly `Confirm` AI suggestions to prevent silent or hallucinated connections.
+The e2e server runs on a dedicated port to prevent conflicts with the dev server:
+
+  Server                  PORT    HMR Port
+  Dev (npm run dev)       64532   24678
+  E2E (playwright test)   64533   24679
+
+After a run both ports must be free:
+  lsof -nP -iTCP:64533 -iTCP:24679 -sTCP:LISTEN   # must be empty
+
+---
+
+## Production
+
+NODE_ENV=production is required. The server refuses to start if:
+- AI_PROVIDER=mock
+- DISABLE_RATE_LIMIT=1
+- GEMINI_API_KEY is missing
+
+HOST defaults to 0.0.0.0 in production so the load balancer can reach it.
+
+---
+
+## Port Layout
+
+  Context         PORT          HMR Port   HOST default
+  Dev             64532         24678      127.0.0.1
+  E2E             64533         24679      127.0.0.1
+  Production      $PORT/3000    N/A        0.0.0.0

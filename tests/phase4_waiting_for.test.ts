@@ -1,3 +1,4 @@
+// ordered scenario, tests share state
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { db } from '../src/db';
@@ -206,7 +207,8 @@ describe('Phase 4: Waiting For Lifecycle & Verification', () => {
     const getRes = await request(app)
       .get(`/api/v1/items/${manualWaitingItemId}`)
       .set('Cookie', authCookieB);
-    expect(getRes.status).toBe(403);
+    expect(getRes.status).toBe(404);
+    expect(getRes.body.error).toContain('Item not found');
 
     // User B attempts to patch User A's waiting item
     const patchRes = await request(app)

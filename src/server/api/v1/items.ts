@@ -5,8 +5,12 @@ import { eq, desc, and, inArray } from "drizzle-orm";
 import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
 import { reminderService } from "../../services/ReminderService";
 import { groupItemsIntoTimeline, TimelineItem } from "../../../shared/utils/timeline";
+import { isValidUuid, applyUuidParamValidation } from "../../middlewares/validation";
 
 export const itemsRouter = Router();
+applyUuidParamValidation(itemsRouter);
+
+const isValidUUID = isValidUuid;
 
 // Create item manually (for tasks, waiting_for, entities, etc.)
 itemsRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res, next) => {
@@ -84,6 +88,9 @@ itemsRouter.get("/timeline", requireAuth, async (req: AuthenticatedRequest, res,
 itemsRouter.get("/:id", requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
+    if (!isValidUUID(id)) {
+      return res.status(400).json({ error: "Invalid format for identifier" });
+    }
 
     const [item] = await db
       .select()
@@ -123,7 +130,7 @@ itemsRouter.get("/:id", requireAuth, async (req: AuthenticatedRequest, res, next
     }
 
     // If item is not owned by user and not shared with user's family
-    return res.status(403).json({ error: "Access denied: this item is private to its owner" });
+    return res.status(404).json({ error: "Item not found" });
   } catch (error) {
     next(error);
   }
@@ -133,6 +140,9 @@ itemsRouter.get("/:id", requireAuth, async (req: AuthenticatedRequest, res, next
 itemsRouter.get("/:id/reminders", requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
+    if (!isValidUUID(id)) {
+      return res.status(400).json({ error: "Invalid format for identifier" });
+    }
 
     const itemReminders = await db
       .select()
@@ -150,21 +160,18 @@ itemsRouter.get("/:id/reminders", requireAuth, async (req: AuthenticatedRequest,
 itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
+    if (!isValidUUID(id)) {
+      return res.status(400).json({ error: "Invalid format for identifier" });
+    }
     const { status, title, itemType, dueDate, metadata, snoozedUntil } = req.body;
     
-    // Ensure ownership
-    const [existing] = await db
-      .select()
-      .from(items)
-      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
-      .limit(1);
-
-    if (!existing) {
-      return res.status(404).json({ error: "Item not found" });
+    // Determine if we need to auto-adjust completedAt based on incoming status
+    let completedAt: Date | null | undefined = undefined;
+    if (status === "completed") {
+      completedAt = new Date();
+    } else if (status === "active") {
+      completedAt = null;
     }
-
-    const hasDueDateChanged = dueDate !== undefined && 
-      (dueDate ? new Date(dueDate).toISOString() : null) !== (existing.dueDate ? existing.dueDate.toISOString() : null);
 
     const updatePayload: any = {};
     if (status !== undefined) updatePayload.status = status;
@@ -177,28 +184,29 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
     if (dueDate !== undefined) {
       updatePayload.dueDate = dueDate ? new Date(dueDate) : null;
     }
-
-    if (status === "completed" && existing.status !== "completed") {
-      updatePayload.completedAt = new Date();
-    } else if (status === "active" && existing.status === "completed") {
-      updatePayload.completedAt = null;
+    if (completedAt !== undefined) {
+      updatePayload.completedAt = completedAt;
     }
 
     const [updatedItem] = await db
       .update(items)
       .set(updatePayload)
-      .where(eq(items.id, id))
+      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
       .returning();
 
-    // If deadline changed, automatically reschedule relative reminders!
-    if (hasDueDateChanged && dueDate) {
+    if (!updatedItem) {
+      return res.status(404).json({ error: "Item not found or could not be updated" });
+    }
+
+    // If deadline was provided in payload, automatically reschedule relative reminders
+    if (dueDate !== undefined) {
       await reminderService.rescheduleForDeadlineChange(id, new Date(dueDate));
     }
 
     // If completed or reopened, adjust reminders
     if (status === "completed") {
       await db.update(reminders).set({ status: "dismissed" }).where(eq(reminders.itemId, id));
-    } else if (status === "active" && existing.status === "completed") {
+    } else if (status === "active") {
       await db.update(reminders).set({ status: "scheduled" }).where(eq(reminders.itemId, id));
     }
       
@@ -212,6 +220,9 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
 itemsRouter.post("/:id/snooze", requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
+    if (!isValidUUID(id)) {
+      return res.status(400).json({ error: "Invalid format for identifier" });
+    }
     const { snoozeDays, snoozeUntil } = req.body;
 
     let targetDate: Date;
@@ -224,17 +235,10 @@ itemsRouter.post("/:id/snooze", requireAuth, async (req: AuthenticatedRequest, r
       targetDate.setHours(9, 0, 0, 0);
     }
 
-    const [existing] = await db
-      .select()
-      .from(items)
-      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
-      .limit(1);
-
-    if (!existing) {
+    const updated = await reminderService.snoozeItem(id, req.userId!, targetDate);
+    if (!updated) {
       return res.status(404).json({ error: "Item not found" });
     }
-
-    const updated = await reminderService.snoozeItem(id, targetDate);
     res.json({ item: updated });
   } catch (error) {
     next(error);
@@ -245,19 +249,15 @@ itemsRouter.post("/:id/snooze", requireAuth, async (req: AuthenticatedRequest, r
 itemsRouter.post("/:id/complete", requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
+    if (!isValidUUID(id)) {
+      return res.status(400).json({ error: "Invalid format for identifier" });
+    }
     const { completed = true } = req.body;
 
-    const [existing] = await db
-      .select()
-      .from(items)
-      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
-      .limit(1);
-
-    if (!existing) {
+    const updated = await reminderService.completeItem(id, req.userId!, completed);
+    if (!updated) {
       return res.status(404).json({ error: "Item not found" });
     }
-
-    const updated = await reminderService.completeItem(id, completed);
     res.json({ item: updated });
   } catch (error) {
     next(error);
@@ -268,20 +268,18 @@ itemsRouter.post("/:id/complete", requireAuth, async (req: AuthenticatedRequest,
 itemsRouter.delete("/:id", requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
+    if (!isValidUUID(id)) {
+      return res.status(400).json({ error: "Invalid format for identifier" });
+    }
     
-    // Ensure ownership
-    const [existing] = await db
-      .select()
-      .from(items)
+    // Deleting item cascades to associated reminders
+    const [deletedItem] = await db.delete(items)
       .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
-      .limit(1);
-
-    if (!existing) {
+      .returning();
+    
+    if (!deletedItem) {
       return res.status(404).json({ error: "Item not found" });
     }
-
-    // Deleting item cascades to associated reminders
-    await db.delete(items).where(eq(items.id, id));
     
     res.json({ success: true });
   } catch (error) {

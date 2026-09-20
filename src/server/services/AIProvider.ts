@@ -233,11 +233,18 @@ Return ONLY valid JSON adhering strictly to this schema:
         }
       }
     } catch (err: any) {
-      console.error(`[Gemini AI] Live LLM extraction failed, falling back to heuristic:`, err.message || err);
+      console.error(`[Gemini AI] Live LLM extraction failed:`, err.message || err);
+      if (process.env.NODE_ENV === "production") {
+        throw new Error(`[Gemini AI] Live LLM extraction failed in production: ${err.message || err}`);
+      }
     }
 
     if (itemsList.length === 0) {
-      console.log(`[Gemini AI] No items returned by live LLM, falling back to heuristic.`);
+      if (process.env.NODE_ENV === "production") {
+        console.warn(`[Gemini AI] No items returned by live LLM for capture ${captureId}.`);
+        return;
+      }
+      console.warn(`[Gemini AI] Live LLM returned no items. Falling back to heuristic mock extraction with explicit warning.`);
       return this.mockFallback.processCapture(captureId, userId, rawPayload, type);
     }
 
@@ -365,39 +372,36 @@ export class MockAIProvider implements AIProvider {
         }
       });
     }
-    // 4. Entity Vehicle
-    else if (lower.includes("bought a") || lower.includes("vehicle") || lower.includes("car")) {
-      parsedItems.push({
-        title: rawPayload.replace(/i just bought a/i, "").trim() || "Vehicle",
-        itemType: "vehicle",
-        confidenceScore: 0.95,
-        metadata: { keywords: ["car", "vehicle"] }
-      });
-    }
-    // 5. Entity Home
-    else if (lower.includes("moved to") || lower.includes("home") || lower.includes("st")) {
-      parsedItems.push({
-        title: rawPayload.replace(/moved to/i, "").trim() || "Home",
-        itemType: "home",
-        confidenceScore: 0.95,
-        metadata: { keywords: ["home", "apartment", "house"] }
-      });
-    }
-    // 6. Waiting For
+    // 4. Waiting For
     else if (lower.includes("waiting") || lower.includes("wait") || lower.includes("reply") || lower.includes("hearing back")) {
       let person = "Contact";
-      if (lower.includes("landlord")) person = "Landlord";
-      else if (lower.includes("bob")) person = "Bob";
-      else if (lower.includes("alice")) person = "Alice";
-      else if (lower.includes("doctor")) person = "Doctor";
+      let organization: string | undefined = undefined;
+      let title = "Waiting for response";
 
-      let organization = undefined;
+      // Generic pattern: "Waiting (on|for) [Person/Org] (for|to|about) [Action/Title]"
+      const waitingMatch = rawPayload.match(/waiting\s+(?:on|for)\s+([^,\n\r]+?)(?:\s+(?:for|to|about)\s+(.+))?$/i);
+      if (waitingMatch) {
+        person = waitingMatch[1].trim();
+        if (waitingMatch[2]) {
+          title = waitingMatch[2].trim();
+        } else {
+          title = `Waiting on ${person}`;
+        }
+      } else if (lower.includes("landlord")) {
+        person = "Landlord";
+        title = "Waiting on Landlord for pipe repair";
+      } else if (lower.includes("bob")) {
+        person = "Bob";
+      } else if (lower.includes("alice")) {
+        person = "Alice";
+      } else if (lower.includes("doctor")) {
+        person = "Doctor";
+      } else if (lower.includes("refund")) {
+        title = "Waiting for Refund";
+      }
+
       if (lower.includes("amazon")) organization = "Amazon";
       else if (lower.includes("apple")) organization = "Apple";
-
-      let title = "Waiting for response";
-      if (lower.includes("landlord")) title = "Waiting on Landlord for pipe repair";
-      else if (lower.includes("refund")) title = "Waiting for Refund";
 
       parsedItems.push({
         title: title.length > 50 ? title.substring(0, 50) + "..." : title,
@@ -411,6 +415,24 @@ export class MockAIProvider implements AIProvider {
           isWaitingFor: true,
           notes: rawPayload
         }
+      });
+    }
+    // 5. Entity Vehicle
+    else if (lower.includes("bought a") || lower.includes("vehicle") || /\bcar\b/.test(lower)) {
+      parsedItems.push({
+        title: rawPayload.replace(/i just bought a/i, "").trim() || "Vehicle",
+        itemType: "vehicle",
+        confidenceScore: 0.95,
+        metadata: { keywords: ["car", "vehicle"] }
+      });
+    }
+    // 6. Entity Home
+    else if (lower.includes("moved to") || lower.includes("home") || /\b(?:st|street|ave|avenue|blvd|rd|road)\b/.test(lower)) {
+      parsedItems.push({
+        title: rawPayload.replace(/moved to/i, "").trim() || "Home",
+        itemType: "home",
+        confidenceScore: 0.95,
+        metadata: { keywords: ["home", "apartment", "house"] }
       });
     }
     // 7. Purchase
@@ -477,6 +499,34 @@ export class MockAIProvider implements AIProvider {
   }
 }
 
-export const aiProvider: AIProvider = process.env.GEMINI_API_KEY
-  ? new GeminiAIProvider(process.env.GEMINI_API_KEY)
-  : new MockAIProvider();
+export function createAIProvider(): AIProvider {
+  // Strict production safety checks at startup
+  if (process.env.NODE_ENV === "production") {
+    if (process.env.AI_PROVIDER === "mock") {
+      throw new Error("FATAL: AI_PROVIDER cannot be set to 'mock' in production environment. Fix: Unset or remove AI_PROVIDER from production environment variables.");
+    }
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error("FATAL: GEMINI_API_KEY environment variable is missing in production. Fix: Set GEMINI_API_KEY in your production environment variables (e.g. export GEMINI_API_KEY=\"<your_gemini_api_key>\").");
+    }
+    if (process.env.DISABLE_RATE_LIMIT === "1") {
+      throw new Error("FATAL: DISABLE_RATE_LIMIT cannot be set to '1' in production environment. Fix: Unset or remove DISABLE_RATE_LIMIT from production environment variables.");
+    }
+  }
+
+  // Explicit mock in test or when explicitly requested in non-production
+  if (process.env.AI_PROVIDER === "mock" || process.env.NODE_ENV === "test") {
+    console.log("[AIProvider] Initialized MockAIProvider explicitly (AI_PROVIDER=mock or NODE_ENV=test).");
+    return new MockAIProvider();
+  }
+
+  // Real Gemini AI provider when GEMINI_API_KEY is provided
+  if (process.env.GEMINI_API_KEY) {
+    console.log("[AIProvider] Initialized GeminiAIProvider with configured API key.");
+    return new GeminiAIProvider(process.env.GEMINI_API_KEY);
+  }
+
+  // In any environment, NEVER fall back to the mock silently!
+  throw new Error("FATAL: GEMINI_API_KEY environment variable is missing and AI_PROVIDER is not set to 'mock'. Fix: Provide GEMINI_API_KEY in your environment variables, or explicitly set AI_PROVIDER=mock for offline local development.");
+}
+
+export const aiProvider: AIProvider = createAIProvider();

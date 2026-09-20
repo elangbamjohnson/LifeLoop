@@ -11,9 +11,11 @@ import {
 import { and, eq, desc, inArray } from "drizzle-orm";
 import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
 import { requireFamilyRole } from "../../middlewares/familyAuth";
+import { validateUuidParams, validateUuidBody, applyUuidParamValidation } from "../../middlewares/validation";
 import crypto from "crypto";
 
 export const familiesRouter = Router();
+applyUuidParamValidation(familiesRouter);
 
 // ── Helper: fan out notifications to all family members (except excludedUserId) ──
 async function fanOutNotification(
@@ -143,6 +145,7 @@ familiesRouter.get(
 familiesRouter.patch(
   "/notifications/:notifId/read",
   requireAuth,
+  validateUuidParams("notifId"),
   async (req: AuthenticatedRequest, res, next) => {
     try {
       await db
@@ -170,6 +173,7 @@ familiesRouter.patch(
 familiesRouter.get(
   "/:id",
   requireAuth,
+  validateUuidParams("id"),
   requireFamilyRole("view_only"),
   async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -207,6 +211,7 @@ familiesRouter.get(
 familiesRouter.patch(
   "/:id",
   requireAuth,
+  validateUuidParams("id"),
   requireFamilyRole("admin"),
   async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -230,6 +235,7 @@ familiesRouter.patch(
 familiesRouter.delete(
   "/:id",
   requireAuth,
+  validateUuidParams("id"),
   requireFamilyRole("owner"),
   async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -249,6 +255,7 @@ familiesRouter.delete(
 familiesRouter.post(
   "/:id/invite",
   requireAuth,
+  validateUuidParams("id"),
   requireFamilyRole("admin"),
   async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -430,6 +437,7 @@ familiesRouter.post(
 familiesRouter.patch(
   "/:id/members/:memberId",
   requireAuth,
+  validateUuidParams("id", "memberId"),
   requireFamilyRole("admin"),
   async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -472,6 +480,7 @@ familiesRouter.patch(
 familiesRouter.delete(
   "/:id/members/:memberId",
   requireAuth,
+  validateUuidParams("id", "memberId"),
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const [target] = await db
@@ -529,6 +538,8 @@ familiesRouter.delete(
 familiesRouter.post(
   "/:id/share",
   requireAuth,
+  validateUuidParams("id"),
+  validateUuidBody("itemId"),
   requireFamilyRole("member"),
   async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -586,6 +597,7 @@ familiesRouter.post(
 familiesRouter.get(
   "/:id/shared",
   requireAuth,
+  validateUuidParams("id"),
   requireFamilyRole("view_only"),
   async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -625,6 +637,7 @@ familiesRouter.get(
 familiesRouter.delete(
   "/:id/shared/:sharedItemId",
   requireAuth,
+  validateUuidParams("id", "sharedItemId"),
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const [shared] = await db

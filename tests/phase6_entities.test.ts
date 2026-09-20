@@ -1,3 +1,4 @@
+// ordered scenario, tests share state
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { db } from '../src/db';
@@ -246,7 +247,8 @@ describe('Phase 6: Life Graph, Entities & Relationships (P0/P1)', () => {
     const getRes = await request(app)
       .get(`/api/v1/items/${vehicleEntityId}`)
       .set('Cookie', authCookieB);
-    expect(getRes.status).toBe(403);
+    expect(getRes.status).toBe(404);
+    expect(getRes.body.error).toContain('Item not found');
 
     // User B attempts to view relations for User A's entity
     const relRes = await request(app)
@@ -255,5 +257,36 @@ describe('Phase 6: Life Graph, Entities & Relationships (P0/P1)', () => {
     expect(relRes.status).toBe(200);
     // User B receives empty relations list because user_id query filter isolates it
     expect(relRes.body.relations).toEqual([]);
+  });
+
+  // 7. Route Input Validation
+  it('should return 400 when PATCH /relations is called with a non-uuid identifier', async () => {
+    const patchRes = await request(app)
+      .patch('/api/v1/relations/not-a-uuid')
+      .set('Cookie', authCookieA)
+      .send({ relationshipType: 'service_record' });
+    expect(patchRes.status).toBe(400);
+    expect(patchRes.body.error).toContain('Invalid identifier format');
+  });
+
+  it('should return 400 when DELETE /relations is called with a non-uuid identifier', async () => {
+    const delRes = await request(app)
+      .delete('/api/v1/relations/not-a-uuid')
+      .set('Cookie', authCookieA);
+    expect(delRes.status).toBe(400);
+    expect(delRes.body.error).toContain('Invalid identifier format');
+  });
+
+  it('should return 400 when POST /relations is called without targetItemId', async () => {
+    const res = await request(app)
+      .post('/api/v1/relations')
+      .set('Cookie', authCookieA)
+      .send({
+        sourceItemId: vehicleEntityId,
+        // targetItemId omitted
+        relationshipType: 'belongs_to',
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Missing or invalid identifier format');
   });
 });

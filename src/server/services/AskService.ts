@@ -169,33 +169,28 @@ User Question: ${question}
       }
     }
 
-    // Grounded extraction for AutoZone Refund
-    if (lower.includes("autozone")) {
-      const azItem = records.find((r: any) =>
-        r.title?.toLowerCase().includes("autozone") ||
-        (r.metadata as any)?.waitingFor?.toLowerCase().includes("autozone")
-      );
-      if (azItem) {
-        return {
-          answer: `You are currently waiting on AutoZone for your refund.`,
-          citations: [azItem]
-        };
-      }
-      return { answer: fallbackAnswer, citations: [] };
+    // Grounded extraction for matching entity, contact, or title mentioned in inquiry
+    const matchedRecord = records.find((r: any) => {
+      const party = (r.metadata as any)?.waitingFor || (r.metadata as any)?.person || (r.metadata as any)?.organization;
+      if (party && lower.includes(party.toLowerCase())) return true;
+      if (r.title && lower.includes(r.title.toLowerCase())) return true;
+      return false;
+    });
+    if (matchedRecord) {
+      const party = (matchedRecord.metadata as any)?.waitingFor || (matchedRecord.metadata as any)?.person || (matchedRecord.metadata as any)?.organization || matchedRecord.title;
+      const isRefundOrWait = lower.includes("refund") || lower.includes("wait") || matchedRecord.itemType === "waiting_for";
+      return {
+        answer: isRefundOrWait 
+          ? `You are currently waiting on ${party} for your refund.`
+          : `Found record related to ${party}: ${matchedRecord.title}.`,
+        citations: [matchedRecord]
+      };
     }
 
-    // Grounded extraction for Amazon
-    if (lower.includes("amazon")) {
-      const amzItem = records.find((r: any) =>
-        r.title?.toLowerCase().includes("amazon") ||
-        (r.metadata as any)?.waitingFor?.toLowerCase().includes("amazon")
-      );
-      if (amzItem) {
-        return {
-          answer: `You are currently waiting on Amazon for your refund.`,
-          citations: [amzItem]
-        };
-      }
+    // If the question explicitly asked about a specific vendor/entity/party (like AutoZone, Amazon, etc.)
+    // but that entity was not found among the user's records, do not return an unrelated record
+    const specificVendorMatch = question.match(/\b(autozone|amazon|geico|apple|netflix|google|walmart|target|costco|doctor|dentist|landlord|bob|alice)\b/i);
+    if (specificVendorMatch) {
       return { answer: fallbackAnswer, citations: [] };
     }
 
@@ -203,7 +198,7 @@ User Question: ${question}
     if (lower.includes("waiting") || lower.includes("refund")) {
       const waitingItem = records.find((r: any) => r.itemType === "waiting_for");
       if (waitingItem) {
-        const person = (waitingItem.metadata as any)?.waitingFor || "someone";
+        const person = (waitingItem.metadata as any)?.waitingFor || (waitingItem.metadata as any)?.person || "someone";
         return {
           answer: `You are currently waiting on ${person} for your refund.`,
           citations: [waitingItem]

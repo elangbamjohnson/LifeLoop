@@ -4,8 +4,10 @@ import { reminders, items, users } from "../../../db/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
 import { reminderService } from "../../services/ReminderService";
+import { validateUuidParams, validateUuidBody, isValidUuid, applyUuidParamValidation } from "../../middlewares/validation";
 
 export const remindersRouter = Router();
+applyUuidParamValidation(remindersRouter);
 
 // 1. Get all reminders for current user
 remindersRouter.get("/", requireAuth, async (req: AuthenticatedRequest, res, next) => {
@@ -22,7 +24,7 @@ remindersRouter.get("/", requireAuth, async (req: AuthenticatedRequest, res, nex
   }
 });
 
-// 2. Create custom reminder
+// 2. Create standalone or custom reminder
 remindersRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
     const {
@@ -39,6 +41,10 @@ remindersRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res, ne
 
     if (!title) {
       return res.status(400).json({ error: "Title is required" });
+    }
+
+    if (itemId && !isValidUuid(itemId)) {
+      return res.status(400).json({ error: "Invalid identifier format for 'itemId'" });
     }
 
     const newReminder = await reminderService.createReminder({
@@ -61,7 +67,7 @@ remindersRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res, ne
 });
 
 // 3. Create standard relative reminders for an item (30d, 7d, 1d, 0d)
-remindersRouter.post("/standard-relative", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+remindersRouter.post("/standard-relative", requireAuth, validateUuidBody("itemId"), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { itemId, offsets, channel, timezone } = req.body;
 
@@ -97,7 +103,7 @@ remindersRouter.post("/standard-relative", requireAuth, async (req: Authenticate
 });
 
 // 4. Snooze reminder
-remindersRouter.post("/:id/snooze", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+remindersRouter.post("/:id/snooze", requireAuth, validateUuidParams("id"), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const { snoozeUntil } = req.body;
@@ -124,7 +130,7 @@ remindersRouter.post("/:id/snooze", requireAuth, async (req: AuthenticatedReques
 });
 
 // 5. Update reminder
-remindersRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+remindersRouter.patch("/:id", requireAuth, validateUuidParams("id"), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const { title, scheduledAt, recurrence, channel, status } = req.body;
@@ -158,7 +164,7 @@ remindersRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res
 });
 
 // 6. Delete reminder
-remindersRouter.delete("/:id", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+remindersRouter.delete("/:id", requireAuth, validateUuidParams("id"), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
 

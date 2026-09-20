@@ -3,11 +3,13 @@ import { db } from "../../../db";
 import { itemRelations, items } from "../../../db/schema";
 import { eq, or, and, desc } from "drizzle-orm";
 import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
+import { validateUuidParams, validateUuidBody, applyUuidParamValidation } from "../../middlewares/validation";
 
 export const relationsRouter = Router();
+applyUuidParamValidation(relationsRouter);
 
 // Get relations for an item
-relationsRouter.get("/:itemId", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+relationsRouter.get("/:itemId", requireAuth, validateUuidParams("itemId"), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { itemId } = req.params;
 
@@ -29,7 +31,7 @@ relationsRouter.get("/:itemId", requireAuth, async (req: AuthenticatedRequest, r
 });
 
 // Create relationship
-relationsRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+relationsRouter.post("/", requireAuth, validateUuidBody("sourceItemId", "targetItemId"), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { sourceItemId, targetItemId, relationshipType, metadata } = req.body;
     const relType = relationshipType || "related_to";
@@ -69,7 +71,7 @@ relationsRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res, ne
 });
 
 // Update relationship
-relationsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+relationsRouter.patch("/:id", requireAuth, validateUuidParams("id"), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const { status, relationshipType } = req.body;
@@ -101,7 +103,7 @@ relationsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res
 });
 
 // Delete relationship
-relationsRouter.delete("/:id", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+relationsRouter.delete("/:id", requireAuth, validateUuidParams("id"), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
 
