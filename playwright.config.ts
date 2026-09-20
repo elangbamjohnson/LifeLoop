@@ -43,6 +43,12 @@ export default defineConfig({
         ...devices['iPad Pro 11'],
       },
     },
+    {
+      name: 'tablet-android',
+      use: {
+        ...devices['Galaxy Tab S4'],
+      },
+    },
   ],
   webServer: {
     command: 'npm run dev',
