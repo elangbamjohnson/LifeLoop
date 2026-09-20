@@ -32,9 +32,9 @@ describe('Phase 5: Ask My Life (P0/P1 Security, Grounding & Cross-User Isolation
   beforeAll(async () => {
     // 1. Create Test Users
     await db.insert(users).values([
-      { id: userAId, email: `user_a_${userAId}@example.com`, passwordHash: 'hashA' },
-      { id: userBId, email: `user_b_${userBId}@example.com`, passwordHash: 'hashB' },
-      { id: userEmptyId, email: `user_empty_${userEmptyId}@example.com`, passwordHash: 'hashEmpty' },
+      { id: userAId, email: `user_a_${userAId}@example.com`, passwordHash: 'hashA', isAdmin: true },
+      { id: userBId, email: `user_b_${userBId}@example.com`, passwordHash: 'hashB', isAdmin: true },
+      { id: userEmptyId, email: `user_empty_${userEmptyId}@example.com`, passwordHash: 'hashEmpty', isAdmin: true },
     ]);
 
     userACookie = `session=${jwt.sign({ userId: userAId }, JWT_SECRET)}`;
