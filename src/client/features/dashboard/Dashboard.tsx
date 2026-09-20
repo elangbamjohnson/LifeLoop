@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { 
   Plus, 
   Settings, 
@@ -22,6 +22,7 @@ import {
   MoreHorizontal
 } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
+import { createPortal } from "react-dom";
 import { CaptureDialog } from "./CaptureDialog";
 import { ItemCard } from "./ItemCard";
 import { ItemEditModal } from "./ItemEditModal";
@@ -72,26 +73,127 @@ export function Dashboard() {
     onConfirm: () => {},
   });
 
+  const profileBtnRef = useRef<HTMLButtonElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const moreSheetRef = useRef<HTMLDivElement>(null);
   const moreBtnRef = useRef<HTMLButtonElement>(null);
   const captureBtnRef = useRef<HTMLButtonElement>(null);
   const prefsBtnRef = useRef<HTMLButtonElement>(null);
 
-  // Close profile menu when clicking outside
+  const [profileMenuStyles, setProfileMenuStyles] = useState<React.CSSProperties>({});
+
+  const updateProfileMenuPosition = useCallback(() => {
+    if (!profileBtnRef.current) return;
+    const rect = profileBtnRef.current.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const viewportWidth = window.innerWidth;
+
+    const computedStyle = getComputedStyle(document.documentElement);
+    const parsePx = (val: string) => parseFloat(val) || 0;
+    const safeTop = parsePx(computedStyle.getPropertyValue("--safe-top"));
+    const safeBottom = parsePx(computedStyle.getPropertyValue("--safe-bottom"));
+    const safeLeft = parsePx(computedStyle.getPropertyValue("--safe-left"));
+    const safeRight = parsePx(computedStyle.getPropertyValue("--safe-right"));
+
+    const MARGIN = 8;
+    const chipCenterY = rect.top + rect.height / 2;
+    const isUpperHalf = chipCenterY < viewportHeight / 2;
+
+    const styles: React.CSSProperties = {
+      position: "fixed",
+      zIndex: 60,
+      overflowY: "auto",
+    };
+
+    const minLeft = MARGIN + safeLeft;
+    const maxRight = viewportWidth - MARGIN - safeRight;
+    const maxAvailableWidth = maxRight - minLeft;
+    const menuWidth = Math.min(224, Math.max(160, maxAvailableWidth));
+    styles.width = `${menuWidth}px`;
+
+    if (isUpperHalf) {
+      // Opens below the chip
+      const top = rect.bottom + MARGIN;
+      const availableHeight = viewportHeight - top - safeBottom - MARGIN;
+      styles.top = `${top}px`;
+      styles.bottom = "auto";
+      styles.maxHeight = `${Math.max(100, availableHeight)}px`;
+
+      // Right-aligned with the chip
+      let left = rect.right - menuWidth;
+      left = Math.max(minLeft, Math.min(left, maxRight - menuWidth));
+      styles.left = `${left}px`;
+      styles.right = "auto";
+    } else {
+      // Opens upward when anchor is in lower half (rail/sidebar)
+      const bottom = viewportHeight - rect.top + MARGIN;
+      const availableHeight = rect.top - safeTop - MARGIN;
+      styles.bottom = `${bottom}px`;
+      styles.top = "auto";
+      styles.maxHeight = `${Math.max(100, availableHeight)}px`;
+
+      // Left-aligned with anchor, clamped inside safe margin
+      let left = rect.left;
+      left = Math.max(minLeft, Math.min(left, maxRight - menuWidth));
+      styles.left = `${left}px`;
+      styles.right = "auto";
+    }
+
+    setProfileMenuStyles(styles);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (isProfileMenuOpen) {
+      updateProfileMenuPosition();
+    }
+  }, [isProfileMenuOpen, updateProfileMenuPosition]);
+
+  // Handle profile menu open/close, focus, Esc, and outside click
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+    if (!isProfileMenuOpen) return;
+    updateProfileMenuPosition();
+
+    const timer = requestAnimationFrame(() => {
+      const firstItem = document.getElementById("profile-preferences-btn");
+      firstItem?.focus();
+    });
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
         setIsProfileMenuOpen(false);
+        profileBtnRef.current?.focus();
       }
     };
-    if (isProfileMenuOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
+
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (
+        profileMenuRef.current &&
+        !profileMenuRef.current.contains(target) &&
+        profileBtnRef.current &&
+        !profileBtnRef.current.contains(target)
+      ) {
+        setIsProfileMenuOpen(false);
+        profileBtnRef.current?.focus();
+      }
     };
-  }, [isProfileMenuOpen]);
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("touchstart", handlePointerDown);
+    window.addEventListener("resize", updateProfileMenuPosition);
+    window.addEventListener("scroll", updateProfileMenuPosition, true);
+
+    return () => {
+      cancelAnimationFrame(timer);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("touchstart", handlePointerDown);
+      window.removeEventListener("resize", updateProfileMenuPosition);
+      window.removeEventListener("scroll", updateProfileMenuPosition, true);
+    };
+  }, [isProfileMenuOpen, updateProfileMenuPosition]);
 
   // Data
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -448,15 +550,23 @@ export function Dashboard() {
             </button>
 
             {user && (
-              <div className="relative shrink-0" ref={profileMenuRef}>
+              <div className="relative shrink-0">
                 <button
+                  ref={profileBtnRef}
                   id="user-profile-menu-btn"
                   type="button"
-                  onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+                  onClick={() => {
+                    if (isProfileMenuOpen) {
+                      setIsProfileMenuOpen(false);
+                    } else {
+                      updateProfileMenuPosition();
+                      setIsProfileMenuOpen(true);
+                    }
+                  }}
                   className="touch-target-48 min-w-[48px] min-h-[48px] flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-stone-100 dark:bg-stone-800 hover:bg-stone-200/80 dark:hover:bg-stone-700/80 border border-stone-200 dark:border-stone-700 text-xs font-medium cursor-pointer transition-colors max-w-[160px]"
                   title={`Account menu (${user.email})`}
                   aria-expanded={isProfileMenuOpen}
-                  aria-haspopup="true"
+                  aria-haspopup="menu"
                 >
                   <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center text-xs font-bold uppercase shrink-0">
                     {user.email ? user.email[0] : "U"}
@@ -468,10 +578,15 @@ export function Dashboard() {
                 </button>
 
                 {/* Profile popover dropdown */}
-                {isProfileMenuOpen && (
+                {isProfileMenuOpen && typeof document !== "undefined" && createPortal(
                   <div
+                    ref={profileMenuRef}
                     id="profile-popover"
-                    className="absolute right-0 bottom-full sm:bottom-auto sm:top-full mb-2 sm:mb-0 sm:mt-2 w-52 sm:w-56 bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] rounded-2xl shadow-xl py-1.5 z-50 animate-in fade-in slide-in-from-bottom-2 sm:slide-in-from-top-2"
+                    role="menu"
+                    aria-label="Account menu"
+                    tabIndex={-1}
+                    style={profileMenuStyles}
+                    className="bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] rounded-2xl shadow-xl py-1.5 animate-in fade-in transition-all"
                   >
                     <div className="px-3.5 py-2.5 border-b border-[#F5F5F4] dark:border-[#383330]">
                       <p className="text-[10px] font-semibold text-[#A8A29E] uppercase tracking-wider">Signed in as</p>
@@ -480,10 +595,12 @@ export function Dashboard() {
                     <div className="p-1.5 space-y-0.5">
                       <button
                         id="profile-preferences-btn"
+                        role="menuitem"
                         type="button"
                         onClick={() => {
                           setIsProfileMenuOpen(false);
                           setIsPreferencesOpen(true);
+                          profileBtnRef.current?.focus();
                         }}
                         className="touch-target-48 min-h-[48px] w-full flex items-center gap-2 px-3 py-2 text-xs text-[#1C1917] dark:text-[#FDFBF7] hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition-colors text-left"
                         title="Reminder Preferences"
@@ -494,6 +611,7 @@ export function Dashboard() {
                       </button>
                       <button
                         id="logout-btn"
+                        role="menuitem"
                         type="button"
                         onClick={() => {
                           setIsProfileMenuOpen(false);
@@ -507,7 +625,8 @@ export function Dashboard() {
                         <span className="font-medium">Log out</span>
                       </button>
                     </div>
-                  </div>
+                  </div>,
+                  document.body
                 )}
               </div>
             )}
@@ -567,19 +686,21 @@ export function Dashboard() {
               tabIndex={activeTab === "captures" ? 0 : -1}
               onKeyDown={(e) => handleTabKeyDown(e, "captures")}
               onClick={() => setActiveTab("captures")}
-              className={`chrome-tab-item touch-target-48 relative ${
+              className={`chrome-tab-item touch-target-48 ${
                 activeTab === "captures"
                   ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
                   : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
               }`}
             >
-              <Inbox className="w-5 h-5 text-emerald-500 shrink-0" />
+              <div className="relative inline-flex shrink-0">
+                <Inbox className="w-5 h-5 text-emerald-500 shrink-0" />
+                {captures.length > 0 && (
+                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none pointer-events-none shadow-xs">
+                    {captures.length > 99 ? "99+" : captures.length}
+                  </span>
+                )}
+              </div>
               <span>Inbox</span>
-              {captures.length > 0 && (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-stone-300 dark:bg-stone-700 font-bold">
-                  {captures.length}
-                </span>
-              )}
             </button>
 
             {/* 4. Ask (Admin only) */}
@@ -621,19 +742,21 @@ export function Dashboard() {
                   setActiveTab("family");
                   setActiveEntity(null);
                 }}
-                className={`chrome-tab-item touch-target-48 relative ${
+                className={`chrome-tab-item touch-target-48 ${
                   activeTab === "family"
                     ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
                     : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
                 }`}
               >
-                <Users className="w-5 h-5 text-emerald-500 shrink-0" />
+                <div className="relative inline-flex shrink-0">
+                  <Users className="w-5 h-5 text-emerald-500 shrink-0" />
+                  {familyUnreadCount > 0 && (
+                    <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none pointer-events-none shadow-xs">
+                      {familyUnreadCount > 9 ? "9+" : familyUnreadCount}
+                    </span>
+                  )}
+                </div>
                 <span>Family</span>
-                {familyUnreadCount > 0 && (
-                  <span className="px-1.5 py-0.2 bg-red-500 text-white text-[9px] font-bold rounded-full">
-                    {familyUnreadCount > 9 ? "9+" : familyUnreadCount}
-                  </span>
-                )}
               </button>
             )}
           </div>
@@ -746,19 +869,21 @@ export function Dashboard() {
                     setActiveEntity(null);
                     if (isMoreOpen) closeMore();
                   }}
-                  className={`chrome-tab-item touch-target-48 relative ${
+                  className={`chrome-tab-item touch-target-48 ${
                     activeTab === "family"
                       ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
                       : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
                   }`}
                 >
-                  <Users className="w-5 h-5 text-emerald-500 shrink-0" />
+                  <div className="relative inline-flex shrink-0">
+                    <Users className="w-5 h-5 text-emerald-500 shrink-0" />
+                    {familyUnreadCount > 0 && (
+                      <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none pointer-events-none shadow-xs">
+                        {familyUnreadCount > 9 ? "9+" : familyUnreadCount}
+                      </span>
+                    )}
+                  </div>
                   <span>Family</span>
-                  {familyUnreadCount > 0 && (
-                    <span className="px-1.5 py-0.2 bg-red-500 text-white text-[9px] font-bold rounded-full">
-                      {familyUnreadCount > 9 ? "9+" : familyUnreadCount}
-                    </span>
-                  )}
                 </button>
               </div>
             </div>
