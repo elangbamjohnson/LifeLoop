@@ -1,8 +1,34 @@
 import { test as base, expect, Page, APIRequestContext } from '@playwright/test';
+import postgres from 'postgres';
+import { assertTestDatabaseLiveGuard } from '../src/db/testDatabaseGuard';
 
 export interface SetupCheckOptions {
   requireDb?: boolean;
   requireGeminiKey?: boolean;
+}
+
+/**
+ * Promotes a test user to admin strictly within the isolated test schema.
+ * NEVER connects to or modifies DATABASE_URL or production database.
+ */
+export async function promoteUserToAdmin(email: string) {
+  const schemaName = process.env.TEST_SCHEMA || 'lifeloop_test_e2e';
+  const rawConnectionString = process.env.TEST_DATABASE_URL;
+  if (!rawConnectionString) {
+    throw new Error("FATAL: TEST_DATABASE_URL is required to promote test user.");
+  }
+  const base = rawConnectionString.replace("-pooler", "");
+  const connStr = base.includes("?")
+    ? `${base}&options=-c%20search_path%3D${schemaName}`
+    : `${base}?options=-c%20search_path%3D${schemaName}`;
+
+  const sql = postgres(connStr, { max: 1, onnotice: () => {} });
+  try {
+    await assertTestDatabaseLiveGuard(sql, schemaName);
+    await sql`UPDATE users SET is_admin = true WHERE email = ${email.toLowerCase()}`;
+  } finally {
+    await sql.end();
+  }
 }
 
 /**
@@ -56,7 +82,12 @@ export async function verifyBackendReadiness(
 /**
  * Registers a fresh test user, sets the session cookie, and seeds test items.
  */
-export async function authenticateAndSeedSession(page: Page, request: APIRequestContext, baseURL: string) {
+export async function authenticateAndSeedSession(
+  page: Page,
+  request: APIRequestContext,
+  baseURL: string,
+  options: { isAdmin?: boolean } = {}
+) {
   await verifyBackendReadiness(request, baseURL, { requireDb: true });
 
   const timestamp = Date.now();
@@ -86,6 +117,11 @@ export async function authenticateAndSeedSession(page: Page, request: APIRequest
       `Status ${regRes.status()}: ${errorBody}\n` +
       `Fix: Verify database schema migrations and user table availability.\n`
     );
+  }
+
+  // If admin privileges are requested, promote user strictly in test schema
+  if (options.isAdmin) {
+    await promoteUserToAdmin(testEmail);
   }
 
   // 2. Extract session cookie and apply to browser context

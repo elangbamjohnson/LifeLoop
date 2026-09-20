@@ -117,7 +117,7 @@ async function auditHorizontalOverflow(
 
 test.describe('Horizontal Scrolling & Overflow Audit', () => {
   test.beforeEach(async ({ page, request, baseURL }) => {
-    await authenticateAndSeedSession(page, request, baseURL!);
+    await authenticateAndSeedSession(page, request, baseURL!, { isAdmin: true });
   });
 
   for (const viewport of testWidths) {

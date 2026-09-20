@@ -114,8 +114,8 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
       style={{
-        paddingTop: "max(1rem, env(safe-area-inset-top, 0px))",
-        paddingBottom: "env(safe-area-inset-bottom, 0px)",
+        paddingTop: "max(1rem, var(--safe-top, 0px))",
+        paddingBottom: "var(--safe-bottom, 0px)",
       }}
     >
       {/* Backdrop */}

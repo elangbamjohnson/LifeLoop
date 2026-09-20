@@ -21,7 +21,7 @@ async function setTheme(page: any, theme: 'light' | 'dark') {
 
 test.describe('Accessibility Scans (@axe-core/playwright)', () => {
   test.beforeEach(async ({ page, request, baseURL }) => {
-    await authenticateAndSeedSession(page, request, baseURL!);
+    await authenticateAndSeedSession(page, request, baseURL!, { isAdmin: true });
   });
 
   for (const vp of viewports) {

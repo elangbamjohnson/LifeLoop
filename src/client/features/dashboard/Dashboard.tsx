@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { 
   Plus, 
   Settings, 
@@ -22,6 +22,7 @@ import {
   MoreHorizontal
 } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
+import { createPortal } from "react-dom";
 import { CaptureDialog } from "./CaptureDialog";
 import { ItemCard } from "./ItemCard";
 import { ItemEditModal } from "./ItemEditModal";
@@ -36,12 +37,20 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { useDashboardPolling, Capture } from "../../hooks/useDashboardPolling";
 
 export function Dashboard() {
-  const { user, logout } = useAuth();
+  const { user, loading: authLoading, logout } = useAuth();
+  const isAdmin = Boolean(!authLoading && user?.isAdmin);
   const [activeTab, setActiveTab] = useState<"priority" | "timeline" | "captures" | "ask" | "graph" | "family">("priority");
   const [familyUnreadCount, setFamilyUnreadCount] = useState(0);
   const [isFamilyBannerDismissed, setIsFamilyBannerDismissed] = useState(false);
   const [activeEntity, setActiveEntity] = useState<TimelineItem | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Fail-closed fallback: if activeTab is ask or graph for a non-admin, fall back to priority
+  useEffect(() => {
+    if (!isAdmin && (activeTab === "ask" || activeTab === "graph")) {
+      setActiveTab("priority");
+    }
+  }, [isAdmin, activeTab]);
 
   // Modals & Menus
   const [isCaptureOpen, setIsCaptureOpen] = useState(false);
@@ -64,26 +73,127 @@ export function Dashboard() {
     onConfirm: () => {},
   });
 
+  const profileBtnRef = useRef<HTMLButtonElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const moreSheetRef = useRef<HTMLDivElement>(null);
   const moreBtnRef = useRef<HTMLButtonElement>(null);
   const captureBtnRef = useRef<HTMLButtonElement>(null);
   const prefsBtnRef = useRef<HTMLButtonElement>(null);
 
-  // Close profile menu when clicking outside
+  const [profileMenuStyles, setProfileMenuStyles] = useState<React.CSSProperties>({});
+
+  const updateProfileMenuPosition = useCallback(() => {
+    if (!profileBtnRef.current) return;
+    const rect = profileBtnRef.current.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const viewportWidth = window.innerWidth;
+
+    const computedStyle = getComputedStyle(document.documentElement);
+    const parsePx = (val: string) => parseFloat(val) || 0;
+    const safeTop = parsePx(computedStyle.getPropertyValue("--safe-top"));
+    const safeBottom = parsePx(computedStyle.getPropertyValue("--safe-bottom"));
+    const safeLeft = parsePx(computedStyle.getPropertyValue("--safe-left"));
+    const safeRight = parsePx(computedStyle.getPropertyValue("--safe-right"));
+
+    const MARGIN = 8;
+    const chipCenterY = rect.top + rect.height / 2;
+    const isUpperHalf = chipCenterY < viewportHeight / 2;
+
+    const styles: React.CSSProperties = {
+      position: "fixed",
+      zIndex: 60,
+      overflowY: "auto",
+    };
+
+    const minLeft = MARGIN + safeLeft;
+    const maxRight = viewportWidth - MARGIN - safeRight;
+    const maxAvailableWidth = maxRight - minLeft;
+    const menuWidth = Math.min(224, Math.max(160, maxAvailableWidth));
+    styles.width = `${menuWidth}px`;
+
+    if (isUpperHalf) {
+      // Opens below the chip
+      const top = rect.bottom + MARGIN;
+      const availableHeight = viewportHeight - top - safeBottom - MARGIN;
+      styles.top = `${top}px`;
+      styles.bottom = "auto";
+      styles.maxHeight = `${Math.max(100, availableHeight)}px`;
+
+      // Right-aligned with the chip
+      let left = rect.right - menuWidth;
+      left = Math.max(minLeft, Math.min(left, maxRight - menuWidth));
+      styles.left = `${left}px`;
+      styles.right = "auto";
+    } else {
+      // Opens upward when anchor is in lower half (rail/sidebar)
+      const bottom = viewportHeight - rect.top + MARGIN;
+      const availableHeight = rect.top - safeTop - MARGIN;
+      styles.bottom = `${bottom}px`;
+      styles.top = "auto";
+      styles.maxHeight = `${Math.max(100, availableHeight)}px`;
+
+      // Left-aligned with anchor, clamped inside safe margin
+      let left = rect.left;
+      left = Math.max(minLeft, Math.min(left, maxRight - menuWidth));
+      styles.left = `${left}px`;
+      styles.right = "auto";
+    }
+
+    setProfileMenuStyles(styles);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (isProfileMenuOpen) {
+      updateProfileMenuPosition();
+    }
+  }, [isProfileMenuOpen, updateProfileMenuPosition]);
+
+  // Handle profile menu open/close, focus, Esc, and outside click
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+    if (!isProfileMenuOpen) return;
+    updateProfileMenuPosition();
+
+    const timer = requestAnimationFrame(() => {
+      const firstItem = document.getElementById("profile-preferences-btn");
+      firstItem?.focus();
+    });
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
         setIsProfileMenuOpen(false);
+        profileBtnRef.current?.focus();
       }
     };
-    if (isProfileMenuOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
+
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (
+        profileMenuRef.current &&
+        !profileMenuRef.current.contains(target) &&
+        profileBtnRef.current &&
+        !profileBtnRef.current.contains(target)
+      ) {
+        setIsProfileMenuOpen(false);
+        profileBtnRef.current?.focus();
+      }
     };
-  }, [isProfileMenuOpen]);
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("touchstart", handlePointerDown);
+    window.addEventListener("resize", updateProfileMenuPosition);
+    window.addEventListener("scroll", updateProfileMenuPosition, true);
+
+    return () => {
+      cancelAnimationFrame(timer);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("touchstart", handlePointerDown);
+      window.removeEventListener("resize", updateProfileMenuPosition);
+      window.removeEventListener("scroll", updateProfileMenuPosition, true);
+    };
+  }, [isProfileMenuOpen, updateProfileMenuPosition]);
 
   // Data
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -350,35 +460,40 @@ export function Dashboard() {
     touchCurrentY.current = null;
   };
 
-  // Tab list definitions for 6 destinations + More
+  // Tab list definitions filtered once
   const allDestinations = [
-    { id: "priority", label: "Priority", icon: Sparkles, color: "text-amber-500" },
-    { id: "timeline", label: "Timeline", icon: Clock, color: "text-blue-500" },
-    { id: "captures", label: "Inbox", icon: Inbox, color: "text-emerald-500", count: captures.length },
-    { id: "ask", label: "Ask", icon: Bot, color: "text-indigo-500" },
-    { id: "graph", label: "Graph", icon: Network, color: "text-purple-500" },
-    { id: "family", label: "Family", icon: Users, color: "text-emerald-500", badge: familyUnreadCount },
+    { id: "priority", label: "Priority", icon: Sparkles, color: "text-amber-500", adminOnly: false },
+    { id: "timeline", label: "Timeline", icon: Clock, color: "text-blue-500", adminOnly: false },
+    { id: "captures", label: "Inbox", icon: Inbox, color: "text-emerald-500", count: captures.length, adminOnly: false },
+    { id: "ask", label: "Ask", icon: Bot, color: "text-indigo-500", adminOnly: true },
+    { id: "graph", label: "Graph", icon: Network, color: "text-purple-500", adminOnly: true },
+    { id: "family", label: "Family", icon: Users, color: "text-emerald-500", badge: familyUnreadCount, adminOnly: false },
   ] as const;
 
+  const visibleDestinations = allDestinations.filter((dest) => !dest.adminOnly || isAdmin);
+
   // Arrow key navigation between destinations (roving tabindex)
-  const handleTabKeyDown = (e: React.KeyboardEvent, index: number) => {
-    let nextIndex = index;
+  const handleTabKeyDown = (e: React.KeyboardEvent, tabId: string) => {
+    const currentIndex = visibleDestinations.findIndex((d) => d.id === tabId);
+    if (currentIndex === -1) return;
+
+    let nextIndex = currentIndex;
     if (e.key === "ArrowRight" || e.key === "ArrowDown") {
       e.preventDefault();
-      nextIndex = (index + 1) % allDestinations.length;
+      nextIndex = (currentIndex + 1) % visibleDestinations.length;
     } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
       e.preventDefault();
-      nextIndex = (index - 1 + allDestinations.length) % allDestinations.length;
+      nextIndex = (currentIndex - 1 + visibleDestinations.length) % visibleDestinations.length;
     } else if (e.key === "Home") {
       e.preventDefault();
       nextIndex = 0;
     } else if (e.key === "End") {
       e.preventDefault();
-      nextIndex = allDestinations.length - 1;
+      nextIndex = visibleDestinations.length - 1;
     } else {
       return;
     }
-    const nextDestination = allDestinations[nextIndex];
+    const nextDestination = visibleDestinations[nextIndex];
     setActiveTab(nextDestination.id as any);
     document.getElementById(`tab-${nextDestination.id}`)?.focus();
   };
@@ -435,15 +550,23 @@ export function Dashboard() {
             </button>
 
             {user && (
-              <div className="relative shrink-0" ref={profileMenuRef}>
+              <div className="relative shrink-0">
                 <button
+                  ref={profileBtnRef}
                   id="user-profile-menu-btn"
                   type="button"
-                  onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+                  onClick={() => {
+                    if (isProfileMenuOpen) {
+                      setIsProfileMenuOpen(false);
+                    } else {
+                      updateProfileMenuPosition();
+                      setIsProfileMenuOpen(true);
+                    }
+                  }}
                   className="touch-target-48 min-w-[48px] min-h-[48px] flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-stone-100 dark:bg-stone-800 hover:bg-stone-200/80 dark:hover:bg-stone-700/80 border border-stone-200 dark:border-stone-700 text-xs font-medium cursor-pointer transition-colors max-w-[160px]"
                   title={`Account menu (${user.email})`}
                   aria-expanded={isProfileMenuOpen}
-                  aria-haspopup="true"
+                  aria-haspopup="menu"
                 >
                   <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center text-xs font-bold uppercase shrink-0">
                     {user.email ? user.email[0] : "U"}
@@ -455,10 +578,15 @@ export function Dashboard() {
                 </button>
 
                 {/* Profile popover dropdown */}
-                {isProfileMenuOpen && (
+                {isProfileMenuOpen && typeof document !== "undefined" && createPortal(
                   <div
+                    ref={profileMenuRef}
                     id="profile-popover"
-                    className="absolute right-0 bottom-full sm:bottom-auto sm:top-full mb-2 sm:mb-0 sm:mt-2 w-52 sm:w-56 bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] rounded-2xl shadow-xl py-1.5 z-50 animate-in fade-in slide-in-from-bottom-2 sm:slide-in-from-top-2"
+                    role="menu"
+                    aria-label="Account menu"
+                    tabIndex={-1}
+                    style={profileMenuStyles}
+                    className="bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] rounded-2xl shadow-xl py-1.5 animate-in fade-in transition-all"
                   >
                     <div className="px-3.5 py-2.5 border-b border-[#F5F5F4] dark:border-[#383330]">
                       <p className="text-[10px] font-semibold text-[#A8A29E] uppercase tracking-wider">Signed in as</p>
@@ -467,10 +595,12 @@ export function Dashboard() {
                     <div className="p-1.5 space-y-0.5">
                       <button
                         id="profile-preferences-btn"
+                        role="menuitem"
                         type="button"
                         onClick={() => {
                           setIsProfileMenuOpen(false);
                           setIsPreferencesOpen(true);
+                          profileBtnRef.current?.focus();
                         }}
                         className="touch-target-48 min-h-[48px] w-full flex items-center gap-2 px-3 py-2 text-xs text-[#1C1917] dark:text-[#FDFBF7] hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition-colors text-left"
                         title="Reminder Preferences"
@@ -481,6 +611,7 @@ export function Dashboard() {
                       </button>
                       <button
                         id="logout-btn"
+                        role="menuitem"
                         type="button"
                         onClick={() => {
                           setIsProfileMenuOpen(false);
@@ -494,131 +625,171 @@ export function Dashboard() {
                         <span className="font-medium">Log out</span>
                       </button>
                     </div>
-                  </div>
+                  </div>,
+                  document.body
                 )}
               </div>
             )}
           </div>
         </div>
 
-        {/* Tablist navigation (Priority, Timeline, Inbox, Ask, More; Graph & Family in More sheet on phone) */}
+        {/* Tablist navigation (Non-admin: 4 items directly; Admin: 4 items + More button on phone; Graph & Family in More sheet / inline) */}
         <nav aria-label="Main Destinations" className="chrome-tablist">
           <div role="tablist" className="contents">
-          {/* 1. Priority */}
-          <button
-            type="button"
-            id="tab-priority"
-            role="tab"
-            aria-selected={activeTab === "priority"}
-            aria-controls="panel-priority"
-            tabIndex={activeTab === "priority" ? 0 : -1}
-            onKeyDown={(e) => handleTabKeyDown(e, 0)}
-            onClick={() => setActiveTab("priority")}
-            className={`chrome-tab-item touch-target-48 ${
-              activeTab === "priority"
-                ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
-                : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
-            }`}
-          >
-            <Sparkles className="w-5 h-5 text-amber-500 shrink-0" />
-            <span>Priority</span>
-          </button>
+            {/* 1. Priority */}
+            <button
+              type="button"
+              id="tab-priority"
+              role="tab"
+              aria-selected={activeTab === "priority"}
+              aria-controls="panel-priority"
+              tabIndex={activeTab === "priority" ? 0 : -1}
+              onKeyDown={(e) => handleTabKeyDown(e, "priority")}
+              onClick={() => setActiveTab("priority")}
+              className={`chrome-tab-item touch-target-48 ${
+                activeTab === "priority"
+                  ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
+                  : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
+              }`}
+            >
+              <Sparkles className="w-5 h-5 text-amber-500 shrink-0" />
+              <span>Priority</span>
+            </button>
 
-          {/* 2. Timeline */}
-          <button
-            type="button"
-            id="tab-timeline"
-            role="tab"
-            aria-selected={activeTab === "timeline"}
-            aria-controls="panel-timeline"
-            tabIndex={activeTab === "timeline" ? 0 : -1}
-            onKeyDown={(e) => handleTabKeyDown(e, 1)}
-            onClick={() => setActiveTab("timeline")}
-            className={`chrome-tab-item touch-target-48 ${
-              activeTab === "timeline"
-                ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
-                : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
-            }`}
-          >
-            <Clock className="w-5 h-5 text-blue-500 shrink-0" />
-            <span>Timeline</span>
-          </button>
+            {/* 2. Timeline */}
+            <button
+              type="button"
+              id="tab-timeline"
+              role="tab"
+              aria-selected={activeTab === "timeline"}
+              aria-controls="panel-timeline"
+              tabIndex={activeTab === "timeline" ? 0 : -1}
+              onKeyDown={(e) => handleTabKeyDown(e, "timeline")}
+              onClick={() => setActiveTab("timeline")}
+              className={`chrome-tab-item touch-target-48 ${
+                activeTab === "timeline"
+                  ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
+                  : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
+              }`}
+            >
+              <Clock className="w-5 h-5 text-blue-500 shrink-0" />
+              <span>Timeline</span>
+            </button>
 
-          {/* 3. Inbox (Captures) */}
-          <button
-            type="button"
-            id="tab-captures"
-            role="tab"
-            aria-selected={activeTab === "captures"}
-            aria-controls="panel-captures"
-            tabIndex={activeTab === "captures" ? 0 : -1}
-            onKeyDown={(e) => handleTabKeyDown(e, 2)}
-            onClick={() => setActiveTab("captures")}
-            className={`chrome-tab-item touch-target-48 relative ${
-              activeTab === "captures"
-                ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
-                : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
-            }`}
-          >
-            <Inbox className="w-5 h-5 text-emerald-500 shrink-0" />
-            <span>Inbox</span>
-            {captures.length > 0 && (
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-stone-300 dark:bg-stone-700 font-bold">
-                {captures.length}
-              </span>
+            {/* 3. Inbox (Captures) */}
+            <button
+              type="button"
+              id="tab-captures"
+              role="tab"
+              aria-selected={activeTab === "captures"}
+              aria-controls="panel-captures"
+              tabIndex={activeTab === "captures" ? 0 : -1}
+              onKeyDown={(e) => handleTabKeyDown(e, "captures")}
+              onClick={() => setActiveTab("captures")}
+              className={`chrome-tab-item touch-target-48 ${
+                activeTab === "captures"
+                  ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
+                  : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
+              }`}
+            >
+              <div className="relative inline-flex shrink-0">
+                <Inbox className="w-5 h-5 text-emerald-500 shrink-0" />
+                {captures.length > 0 && (
+                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none pointer-events-none shadow-xs">
+                    {captures.length > 99 ? "99+" : captures.length}
+                  </span>
+                )}
+              </div>
+              <span>Inbox</span>
+            </button>
+
+            {/* 4. Ask (Admin only) */}
+            {isAdmin && (
+              <button
+                type="button"
+                id="tab-ask"
+                role="tab"
+                aria-selected={activeTab === "ask"}
+                aria-controls="panel-ask"
+                tabIndex={activeTab === "ask" ? 0 : -1}
+                onKeyDown={(e) => handleTabKeyDown(e, "ask")}
+                onClick={() => {
+                  setActiveTab("ask");
+                  setActiveEntity(null);
+                }}
+                className={`chrome-tab-item touch-target-48 ${
+                  activeTab === "ask"
+                    ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
+                    : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
+                }`}
+              >
+                <Bot className="w-5 h-5 text-indigo-500 shrink-0" />
+                <span>Ask</span>
+              </button>
             )}
-          </button>
 
-          {/* 4. Ask */}
-          <button
-            type="button"
-            id="tab-ask"
-            role="tab"
-            aria-selected={activeTab === "ask"}
-            aria-controls="panel-ask"
-            tabIndex={activeTab === "ask" ? 0 : -1}
-            onKeyDown={(e) => handleTabKeyDown(e, 3)}
-            onClick={() => {
-              setActiveTab("ask");
-              setActiveEntity(null);
-            }}
-            className={`chrome-tab-item touch-target-48 ${
-              activeTab === "ask"
-                ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
-                : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
-            }`}
-          >
-            <Bot className="w-5 h-5 text-indigo-500 shrink-0" />
-            <span>Ask</span>
-          </button>
-
+            {/* If Non-Admin, Family is rendered directly in tablist (4 items total, no More button) */}
+            {!isAdmin && (
+              <button
+                type="button"
+                id="tab-family"
+                role="tab"
+                aria-selected={activeTab === "family"}
+                aria-controls="panel-family"
+                tabIndex={activeTab === "family" ? 0 : -1}
+                onKeyDown={(e) => handleTabKeyDown(e, "family")}
+                onClick={() => {
+                  setActiveTab("family");
+                  setActiveEntity(null);
+                }}
+                className={`chrome-tab-item touch-target-48 ${
+                  activeTab === "family"
+                    ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
+                    : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
+                }`}
+              >
+                <div className="relative inline-flex shrink-0">
+                  <Users className="w-5 h-5 text-emerald-500 shrink-0" />
+                  {familyUnreadCount > 0 && (
+                    <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none pointer-events-none shadow-xs">
+                      {familyUnreadCount > 9 ? "9+" : familyUnreadCount}
+                    </span>
+                  )}
+                </div>
+                <span>Family</span>
+              </button>
+            )}
           </div>
-          {/* 5. More button (phone only, outside tablist — reached by Tab after the four tabs) */}
-          <button
-            type="button"
-            id="tab-more"
-            ref={moreBtnRef}
-            aria-haspopup="dialog"
-            aria-expanded={isMoreOpen}
-            aria-controls="more-sheet-wrapper"
-            aria-label="More navigation options"
-            onClick={() => {
-              if (isMoreOpen) closeMore();
-              else openMore();
-            }}
-            className={`chrome-tab-item touch-target-48 ${
-              isMoreActive
-                ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
-                : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
-            }`}
-          >
-            <MoreHorizontal className={`w-5 h-5 shrink-0 ${isMoreActive ? "text-amber-500" : ""}`} />
-            <span>More</span>
-          </button>
+
+          {/* 5. More button (Admin only, phone only, outside tablist — reached by Tab after the tabs) */}
+          {isAdmin && (
+            <button
+              type="button"
+              id="tab-more"
+              ref={moreBtnRef}
+              aria-haspopup="dialog"
+              aria-expanded={isMoreOpen}
+              aria-controls="more-sheet-wrapper"
+              aria-label="More navigation options"
+              onClick={() => {
+                if (isMoreOpen) closeMore();
+                else openMore();
+              }}
+              className={`chrome-tab-item touch-target-48 ${
+                isMoreActive
+                  ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
+                  : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
+              }`}
+            >
+              <MoreHorizontal className={`w-5 h-5 shrink-0 ${isMoreActive ? "text-amber-500" : ""}`} />
+              <span>More</span>
+            </button>
+          )}
         </nav>
 
-        {/* Graph & Family Container (More sheet on phone, inline in rail/sidebar) */}
-        <div
+        {/* Graph & Family Container (Admin only: More sheet on phone, inline in rail/sidebar) */}
+        {isAdmin && (
+          <div
             id="more-sheet-wrapper"
             className={isMoreOpen ? "sheet-open" : ""}
             role={isMoreOpen ? "dialog" : undefined}
@@ -660,62 +831,64 @@ export function Dashboard() {
                 </button>
               </div>
 
-              {/* 5. Graph Tab */}
+              {/* 5. Graph Tab & 6. Family Tab */}
               <div role="tablist" aria-label="More Views Tabs" className="flex flex-col">
                 <button
                   type="button"
-                id="tab-graph"
-                role="tab"
-                aria-selected={activeTab === "graph"}
-                aria-controls="panel-graph"
-                tabIndex={activeTab === "graph" ? 0 : -1}
-                onKeyDown={(e) => handleTabKeyDown(e, 4)}
-                onClick={() => {
-                  setActiveTab("graph");
-                  setActiveEntity(null);
-                  if (isMoreOpen) closeMore();
-                }}
-                className={`chrome-tab-item touch-target-48 ${
-                  activeTab === "graph"
-                    ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
-                    : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
-                }`}
-              >
-                <Network className="w-5 h-5 text-purple-500 shrink-0" />
-                <span>Graph</span>
-              </button>
+                  id="tab-graph"
+                  role="tab"
+                  aria-selected={activeTab === "graph"}
+                  aria-controls="panel-graph"
+                  tabIndex={activeTab === "graph" ? 0 : -1}
+                  onKeyDown={(e) => handleTabKeyDown(e, "graph")}
+                  onClick={() => {
+                    setActiveTab("graph");
+                    setActiveEntity(null);
+                    if (isMoreOpen) closeMore();
+                  }}
+                  className={`chrome-tab-item touch-target-48 ${
+                    activeTab === "graph"
+                      ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
+                      : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
+                  }`}
+                >
+                  <Network className="w-5 h-5 text-purple-500 shrink-0" />
+                  <span>Graph</span>
+                </button>
 
-              {/* 6. Family Tab */}
-              <button
-                type="button"
-                id="tab-family"
-                role="tab"
-                aria-selected={activeTab === "family"}
-                aria-controls="panel-family"
-                tabIndex={activeTab === "family" ? 0 : -1}
-                onKeyDown={(e) => handleTabKeyDown(e, 5)}
-                onClick={() => {
-                  setActiveTab("family");
-                  setActiveEntity(null);
-                  if (isMoreOpen) closeMore();
-                }}
-                className={`chrome-tab-item touch-target-48 relative ${
-                  activeTab === "family"
-                    ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
-                    : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
-                }`}
-              >
-                <Users className="w-5 h-5 text-emerald-500 shrink-0" />
-                <span>Family</span>
-                {familyUnreadCount > 0 && (
-                  <span className="px-1.5 py-0.2 bg-red-500 text-white text-[9px] font-bold rounded-full">
-                    {familyUnreadCount > 9 ? "9+" : familyUnreadCount}
-                  </span>
-                )}
-              </button>
+                <button
+                  type="button"
+                  id="tab-family"
+                  role="tab"
+                  aria-selected={activeTab === "family"}
+                  aria-controls="panel-family"
+                  tabIndex={activeTab === "family" ? 0 : -1}
+                  onKeyDown={(e) => handleTabKeyDown(e, "family")}
+                  onClick={() => {
+                    setActiveTab("family");
+                    setActiveEntity(null);
+                    if (isMoreOpen) closeMore();
+                  }}
+                  className={`chrome-tab-item touch-target-48 ${
+                    activeTab === "family"
+                      ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
+                      : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
+                  }`}
+                >
+                  <div className="relative inline-flex shrink-0">
+                    <Users className="w-5 h-5 text-emerald-500 shrink-0" />
+                    {familyUnreadCount > 0 && (
+                      <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none pointer-events-none shadow-xs">
+                        {familyUnreadCount > 9 ? "9+" : familyUnreadCount}
+                      </span>
+                    )}
+                  </div>
+                  <span>Family</span>
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </header>
 
       {/* ────────────────────────────────────────────────────────────────────
@@ -1238,7 +1411,7 @@ export function Dashboard() {
         {/* ---------------------------------------------------- */}
         {/* VIEW 4: ASK MY LIFE (RAG / AI)                       */}
         {/* ---------------------------------------------------- */}
-        {!loading && activeTab === "ask" && (
+        {!loading && isAdmin && activeTab === "ask" && (
           <div
             role="tabpanel"
             id="panel-ask"
@@ -1258,7 +1431,7 @@ export function Dashboard() {
         {/* ---------------------------------------------------- */}
         {/* VIEW 5: LIFE GRAPH (Entities)                        */}
         {/* ---------------------------------------------------- */}
-        {!loading && activeTab === "graph" && (
+        {!loading && isAdmin && activeTab === "graph" && (
           <div
             role="tabpanel"
             id="panel-graph"

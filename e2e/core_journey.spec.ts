@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { verifyBackendReadiness, navigateToTab } from './fixtures';
+import { verifyBackendReadiness, navigateToTab, promoteUserToAdmin } from './fixtures';
 
 test.describe('LifeLoop End-to-End User Journeys', () => {
   const timestamp = Date.now();
@@ -37,6 +37,9 @@ test.describe('LifeLoop End-to-End User Journeys', () => {
 
     // Verify redirected to Dashboard
     await expect(page).toHaveURL('/');
+    // Promote User A to admin to test Ask features
+    await promoteUserToAdmin(userAEmail);
+    await page.reload();
     await expect(page.locator('h1:has-text("LifeLoop")')).toBeVisible();
 
     // 2. CREATE TEXT CAPTURE (Wait-for & Insurance)
@@ -99,6 +102,9 @@ test.describe('LifeLoop End-to-End User Journeys', () => {
     await page.click('button:has-text("Create Account")');
 
     await expect(page).toHaveURL('/');
+    // Promote User B to admin to test Ask boundary
+    await promoteUserToAdmin(userBEmail);
+    await page.reload();
 
     // Verify User B's dashboard does not contain User A's private items
     await page.click('#tab-timeline');

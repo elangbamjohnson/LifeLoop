@@ -120,10 +120,10 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       id="confirm-dialog"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
       style={{
-        paddingTop: "max(1rem, env(safe-area-inset-top, 0px))",
-        paddingBottom: "max(1rem, env(safe-area-inset-bottom, 0px))",
-        paddingLeft: "max(1rem, env(safe-area-inset-left, 0px))",
-        paddingRight: "max(1rem, env(safe-area-inset-right, 0px))",
+        paddingTop: "max(1rem, var(--safe-top, 0px))",
+        paddingBottom: "max(1rem, var(--safe-bottom, 0px))",
+        paddingLeft: "max(1rem, var(--safe-left, 0px))",
+        paddingRight: "max(1rem, var(--safe-right, 0px))",
       }}
     >
       {/* Backdrop */}
