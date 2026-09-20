@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Mic, Camera, FileUp, Type, X, Send } from "lucide-react";
 
 interface CaptureDialogProps {

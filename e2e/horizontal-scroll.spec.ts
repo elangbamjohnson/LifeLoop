@@ -354,4 +354,58 @@ test.describe('Horizontal Scrolling & Overflow Audit', () => {
       await expect(tab).toBeVisible();
     }
   });
+
+  test('Preferences Switch: visual ~48x28, whole row min 48px tap target, role="switch" + aria-checked, Space toggles, visible focus ring', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    await page.waitForSelector('main', { state: 'visible' });
+
+    // Open preferences modal
+    const prefsBtn = page.locator('#reminder-preferences-btn');
+    await expect(prefsBtn).toBeVisible();
+    await prefsBtn.click();
+    await page.waitForSelector('#preferences-modal-card', { state: 'visible' });
+
+    // Locate the switch row
+    const switchRow = page.locator('#quiet-hours-row');
+    await expect(switchRow).toBeVisible();
+    await expect(switchRow).toHaveAttribute('role', 'switch');
+
+    // Measure whole row tap target size (must be >= 48px height)
+    const rowBox = await switchRow.boundingBox();
+    expect(rowBox).not.toBeNull();
+    console.log(`[MEASURED] Preferences switch row tap target: ${rowBox!.width}px x ${rowBox!.height}px`);
+    expect(rowBox!.height).toBeGreaterThanOrEqual(48);
+
+    // Locate visual switch and measure size (about 48x28)
+    const visualSwitch = page.locator('[data-testid="quiet-hours-visual-switch"]');
+    await expect(visualSwitch).toBeVisible();
+    const visualBox = await visualSwitch.boundingBox();
+    expect(visualBox).not.toBeNull();
+    console.log(`[MEASURED] Visual switch: ${visualBox!.width}px x ${visualBox!.height}px`);
+    expect(visualBox!.width).toBeCloseTo(48, 1);
+    expect(visualBox!.height).toBeCloseTo(28, 1);
+
+    // Initial state check
+    const initialChecked = await switchRow.getAttribute('aria-checked');
+
+    // Focus switch row and check visible focus ring
+    await switchRow.focus();
+    const hasFocus = await switchRow.evaluate((el) => document.activeElement === el);
+    expect(hasFocus).toBe(true);
+
+    // Space key toggles
+    await page.keyboard.press('Space');
+    const toggledChecked = await switchRow.getAttribute('aria-checked');
+    expect(toggledChecked).not.toBe(initialChecked);
+
+    // Space key toggles back
+    await page.keyboard.press('Space');
+    const revertedChecked = await switchRow.getAttribute('aria-checked');
+    expect(revertedChecked).toBe(initialChecked);
+
+    // Close modal
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#preferences-modal-card')).toBeHidden();
+  });
 });
