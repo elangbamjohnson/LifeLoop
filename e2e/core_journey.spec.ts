@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { verifyBackendReadiness } from './fixtures';
+import { verifyBackendReadiness, navigateToTab } from './fixtures';
 
 test.describe('LifeLoop End-to-End User Journeys', () => {
   const timestamp = Date.now();
@@ -76,7 +76,7 @@ test.describe('LifeLoop End-to-End User Journeys', () => {
     await expect(page.locator('text=AutoZone').first()).toBeVisible({ timeout: 10000 });
 
     // 6. FAMILY SHARING
-    await page.click('#tab-family');
+    await navigateToTab(page, 'family');
     
     // Check if empty state or existing family
     const createFamilyBtn = page.locator('button:has-text("Create a Family")');

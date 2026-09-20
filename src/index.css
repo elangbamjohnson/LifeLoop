@@ -1,12 +1,21 @@
 @import "tailwindcss";
 
+@custom-variant touch (@media (pointer: coarse));
+@custom-variant fine (@media (pointer: fine));
+@custom-variant medium (@media (min-width: 600px));
+@custom-variant expanded (@media (min-width: 840px));
+@custom-variant landscape-phone (@media (orientation: landscape) and (min-width: 600px) and (max-width: 999px) and (max-height: 499px));
+
 @theme {
   --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Playfair Display", ui-serif, Georgia, serif;
 }
 
-html, body, #root {
+#root {
   overflow-x: clip;
+}
+
+html, body, #root {
   max-width: 100vw;
   width: 100%;
   overscroll-behavior-y: none; /* Prevent pull-to-refresh and scroll bouncing on mobile */
@@ -15,11 +24,6 @@ html, body, #root {
 
 body {
   font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
-  /* Add safe area insets for notched phones */
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
-  padding-left: env(safe-area-inset-left);
-  padding-right: env(safe-area-inset-right);
 }
 
 button, a {
@@ -34,3 +38,384 @@ button, a {
   scrollbar-width: none;
 }
 
+/* Touch floor 48x48 CSS px, gaps >= 8px, one technique (.touch-target-48) */
+.touch-target-48 {
+  position: relative;
+  min-width: 48px;
+  min-height: 48px;
+}
+.touch-target-48::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 48px;
+  min-height: 48px;
+  pointer-events: auto;
+}
+@media (hover: hover) and (pointer: fine) and (not (any-pointer: coarse)) {
+  .touch-target-48::before {
+    display: none;
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   NAVIGATION MODES (Option B) - 100% CSS-driven, one tablist DOM
+   Mode 1: Under 600px -> Fixed bottom bar, 64px + safe area; top phone header
+   Mode 2: 600-839px (or landscape phone <500px h) -> 80px rail, 100dvh
+   Mode 3: 840px and up (>=500px h) -> 256px sidebar, 100dvh
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* Mode 1: Mobile Phone (<600px) */
+@media (max-width: 599px) {
+  .app-chrome {
+    display: contents;
+  }
+
+  .chrome-top-bar {
+    position: sticky;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    background-color: rgba(253, 251, 247, 0.95);
+    border-bottom: 1px solid rgba(231, 229, 228, 0.8);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  :is(.dark .chrome-top-bar) {
+    background-color: rgba(28, 25, 23, 0.95);
+    border-bottom-color: rgba(68, 64, 60, 0.8);
+  }
+
+  .chrome-tablist {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: calc(64px + env(safe-area-inset-bottom, 0px));
+    z-index: 40;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-around;
+    padding: 0 4px env(safe-area-inset-bottom, 0px) 4px;
+    background-color: rgba(253, 251, 247, 0.95);
+    border-top: 1px solid rgba(231, 229, 228, 0.8);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  :is(.dark .chrome-tablist) {
+    background-color: rgba(28, 25, 23, 0.95);
+    border-top-color: rgba(68, 64, 60, 0.8);
+  }
+
+  .chrome-tab-item {
+    flex: 1;
+    min-width: 48px;
+    min-height: 48px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 6px 2px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1;
+    transition: all 150ms ease;
+  }
+
+  /* In mobile bottom bar, More button is visible */
+  #tab-more {
+    display: flex !important;
+  }
+
+  /* On mobile (<600px), Graph and Family are opened via More sheet */
+  #more-sheet-wrapper:not(.sheet-open) {
+    display: none !important;
+  }
+  #more-sheet-wrapper.sheet-open {
+    display: flex !important;
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 50 !important;
+    flex-direction: column !important;
+    justify-content: flex-end !important;
+  }
+
+  .main-viewport {
+    margin-left: 0 !important;
+    padding-bottom: calc(144px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .fab-button-container {
+    position: fixed;
+    bottom: calc(64px + 16px + env(safe-area-inset-bottom, 0px));
+    right: 16px;
+    z-index: 30;
+  }
+}
+
+/* Mode 2: Rail (600px - 839px OR Landscape Phone <500px h) */
+@media (min-width: 600px) and (max-width: 839px), (orientation: landscape) and (min-width: 600px) and (max-width: 999px) and (max-height: 499px) {
+  .app-chrome {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 80px !important;
+    min-width: 80px !important;
+    max-width: 80px !important;
+    height: 100dvh;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 12px 6px;
+    background-color: rgba(253, 251, 247, 0.98);
+    border-right: 1px solid rgba(231, 229, 228, 0.8);
+  }
+  :is(.dark .app-chrome) {
+    background-color: rgba(28, 25, 23, 0.98);
+    border-right-color: rgba(68, 64, 60, 0.8);
+  }
+
+  .chrome-top-bar {
+    display: contents;
+  }
+  .brand-container {
+    order: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 0 12px 0;
+  }
+  .brand-title {
+    font-size: 11px !important;
+    line-height: 1.2 !important;
+    text-align: center;
+  }
+
+  .chrome-tablist {
+    order: 2;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 0;
+    overflow-y: auto;
+  }
+
+  .chrome-tab-item {
+    width: 100%;
+    min-height: 48px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 6px 2px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1;
+    transition: all 150ms ease;
+  }
+
+  /* In rail mode, More button is hidden; all 6 tabs are visible inline */
+  #tab-more {
+    display: none !important;
+  }
+
+  #more-sheet-wrapper {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    position: static !important;
+    inset: auto !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+  #more-sheet-backdrop,
+  #more-sheet-handle,
+  #more-sheet-header {
+    display: none !important;
+  }
+  #more-sheet-content {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+
+  .actions-container {
+    order: 3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(231, 229, 228, 0.6);
+  }
+  :is(.dark .actions-container) {
+    border-top-color: rgba(68, 64, 60, 0.6);
+  }
+
+  .main-viewport {
+    margin-left: 80px !important;
+    padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .fab-button-container {
+    position: fixed;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    right: 16px;
+    z-index: 30;
+  }
+}
+
+/* Mode 3: Sidebar (840px and up with >=500px height) */
+@media (min-width: 840px) and (min-height: 500px) {
+  .app-chrome {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 256px !important;
+    min-width: 256px !important;
+    max-width: 256px !important;
+    height: 100dvh;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 20px 16px;
+    background-color: rgba(253, 251, 247, 0.98);
+    border-right: 1px solid rgba(231, 229, 228, 0.8);
+  }
+  :is(.dark .app-chrome) {
+    background-color: rgba(28, 25, 23, 0.98);
+    border-right-color: rgba(68, 64, 60, 0.8);
+  }
+
+  .chrome-top-bar {
+    display: contents;
+  }
+  .brand-container {
+    order: 1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 8px 16px 8px;
+  }
+  .brand-title {
+    font-size: 22px !important;
+    line-height: 1.2 !important;
+    text-align: left;
+  }
+
+  .chrome-tablist {
+    order: 2;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 0;
+    overflow-y: auto;
+  }
+
+  .chrome-tab-item {
+    width: 100%;
+    min-height: 48px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 16px;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.2;
+    transition: all 150ms ease;
+  }
+
+  #tab-more {
+    display: none !important;
+  }
+
+  #more-sheet-wrapper {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+    position: static !important;
+    inset: auto !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+  #more-sheet-backdrop,
+  #more-sheet-handle,
+  #more-sheet-header {
+    display: none !important;
+  }
+  #more-sheet-content {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+
+  .actions-container {
+    order: 3;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(231, 229, 228, 0.6);
+  }
+  :is(.dark .actions-container) {
+    border-top-color: rgba(68, 64, 60, 0.6);
+  }
+
+  .main-viewport {
+    margin-left: 256px !important;
+    padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .fab-button-container {
+    position: fixed;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    right: 24px;
+    z-index: 30;
+  }
+}
+
+/* Landscape Phone Optimizations (<500px h, 600-999px w): hide non-essential rows */
+@media (orientation: landscape) and (min-width: 600px) and (max-width: 999px) and (max-height: 499px) {
+  .landscape-hide {
+    display: none !important;
+  }
+}

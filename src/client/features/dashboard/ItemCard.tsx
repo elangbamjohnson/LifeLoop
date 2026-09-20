@@ -477,6 +477,14 @@ export const ItemCard: React.FC<ItemCardProps> = ({
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
+            {(item.metadata?.waitingFor || item.metadata?.person) && (
+              <>
+                <h3 className="text-xs font-semibold text-[#78716C] dark:text-[#A8A29E]">
+                  {item.metadata?.waitingFor || item.metadata?.person}
+                </h3>
+                <span className="text-xs text-[#A8A29E]">•</span>
+              </>
+            )}
             <h4
               className={`text-base font-medium leading-snug tracking-tight ${
                 isCompleted

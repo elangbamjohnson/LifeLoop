@@ -6,25 +6,20 @@ import {
   Loader2, 
   CheckCircle2, 
   Clock, 
-  XCircle, 
   AlertTriangle,
   Calendar,
   Hourglass,
-  Layers,
-  Inbox,
-  Sparkles,
-  Bell,
-  CheckCircle,
-  FileText,
-  Smartphone,
-  Bot,
-  Network,
-  Users,
-  LogOut,
-  X,
+  Inbox, 
+  Sparkles, 
+  Bell, 
+  CheckCircle, 
+  Bot, 
+  Network, 
+  Users, 
+  LogOut, 
+  X, 
   ChevronDown,
-  ChevronLeft,
-  ChevronRight
+  MoreHorizontal
 } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 import { CaptureDialog } from "./CaptureDialog";
@@ -61,7 +56,11 @@ export function Dashboard() {
   const [isInstallOpen, setIsInstallOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<TimelineItem | null>(null);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isMoreOpen, setIsMoreOpen] = useState(false);
+
   const profileMenuRef = useRef<HTMLDivElement>(null);
+  const moreSheetRef = useRef<HTMLDivElement>(null);
+  const moreBtnRef = useRef<HTMLButtonElement>(null);
 
   // Close profile menu when clicking outside
   useEffect(() => {
@@ -83,46 +82,6 @@ export function Dashboard() {
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  // Tab bar scroll affordance indicators
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
-  const tabBarRef = useRef<HTMLDivElement>(null);
-
-  const checkTabBarScroll = () => {
-    if (tabBarRef.current) {
-      const { scrollLeft, scrollWidth, clientWidth } = tabBarRef.current;
-      setCanScrollLeft(scrollLeft > 6);
-      setCanScrollRight(scrollWidth > clientWidth && scrollLeft < scrollWidth - clientWidth - 6);
-    }
-  };
-
-  useEffect(() => {
-    checkTabBarScroll();
-    // Re-check after layout paint and font render
-    const t1 = setTimeout(checkTabBarScroll, 50);
-    const t2 = setTimeout(checkTabBarScroll, 200);
-    const t3 = setTimeout(checkTabBarScroll, 600);
-    window.addEventListener("resize", checkTabBarScroll);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-      window.removeEventListener("resize", checkTabBarScroll);
-    };
-  }, [captures.length, items.length]);
-
-  // Ensure active tab is smoothly visible into view
-  useEffect(() => {
-    if (tabBarRef.current) {
-      const activeEl = tabBarRef.current.querySelector<HTMLElement>(`#tab-${activeTab}`);
-      if (activeEl) {
-        activeEl.scrollIntoView({ behavior: "smooth", inline: "nearest", block: "nearest" });
-      }
-      setTimeout(checkTabBarScroll, 350);
-    }
-  }, [activeTab]);
-
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -198,7 +157,6 @@ export function Dashboard() {
 
   // Toggle complete
   const handleToggleComplete = async (id: string, completed: boolean) => {
-    // Optimistic UI update
     setItems((prev) =>
       prev.map((i) => (i.id === id ? { ...i, status: completed ? "completed" : "active" } : i))
     );
@@ -234,6 +192,9 @@ export function Dashboard() {
 
   // Confirm low-confidence AI parse
   const handleConfirmAI = async (id: string) => {
+    setItems((prev) =>
+      prev.map((i) => (i.id === id ? { ...i, status: "active" } : i))
+    );
     try {
       await fetch(`/api/v1/items/${id}`, {
         method: "PATCH",
@@ -244,6 +205,7 @@ export function Dashboard() {
       fetchData();
     } catch (err) {
       console.error(err);
+      fetchData();
     }
   };
 
@@ -252,316 +214,522 @@ export function Dashboard() {
     if (!confirm("Delete this life item?")) return;
     try {
       await fetch(`/api/v1/items/${id}`, { method: "DELETE" });
+      setItems((prev) => prev.filter((i) => i.id !== id));
       showToast("Item deleted");
-      fetchData();
     } catch (err) {
       console.error(err);
     }
   };
 
-  // Save Item Edit & Reminders
-  const handleSaveItemEdit = async (
-    updated: Partial<TimelineItem> & {
-      reminderOffsets?: number[];
-      recurrence?: string;
-      channel?: string;
-    }
-  ) => {
-    if (!updated.id) return;
-
-    // 1. Update item
-    await fetch(`/api/v1/items/${updated.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: updated.title,
-        itemType: updated.itemType,
-        dueDate: updated.dueDate,
-        status: updated.status,
-        metadata: updated.metadata,
-      }),
-    });
-
-    // 2. If reminders offsets requested and dueDate present, create them
-    if (updated.dueDate && updated.reminderOffsets && updated.reminderOffsets.length > 0) {
-      await fetch("/api/v1/reminders/standard-relative", {
-        method: "POST",
+  // Save edited item
+  const handleSaveItemEdit = async (updated: Partial<TimelineItem> & { reminderOffsets?: number[]; recurrence?: string; channel?: string }) => {
+    if (!editingItem) return;
+    try {
+      const res = await fetch(`/api/v1/items/${editingItem.id}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          itemId: updated.id,
-          offsets: updated.reminderOffsets,
-          channel: updated.channel || "web",
-        }),
+        body: JSON.stringify(updated),
       });
+      if (res.ok) {
+        showToast("Changes saved");
+        fetchData();
+        setEditingItem(null);
+      }
+    } catch (err) {
+      console.error(err);
     }
-
-    showToast("Changes saved");
-    fetchData();
   };
 
-  // Delete raw capture
   const handleDeleteCapture = async (id: string) => {
     if (!confirm("Delete this capture?")) return;
-    await fetch(`/api/v1/captures/${id}`, { method: "DELETE" });
-    fetchData();
+    try {
+      const res = await fetch(`/api/v1/captures/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setCaptures((prev) => prev.filter((c) => c.id !== id));
+        showToast("Capture deleted");
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case "pending":
-      case "processing":
-        return <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin" />;
       case "completed":
         return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />;
+      case "processing":
+        return <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin" />;
       case "failed":
-        return <XCircle className="w-3.5 h-3.5 text-rose-500" />;
+        return <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />;
       default:
         return <Clock className="w-3.5 h-3.5 text-stone-400" />;
     }
   };
 
+  // ────────────────────────────────────────────────────────────────────────────
+  // MORE BOTTOM SHEET HANDLERS & NAVIGATION
+  // ────────────────────────────────────────────────────────────────────────────
+  const closeMore = () => {
+    setIsMoreOpen(false);
+    if (typeof window !== "undefined" && window.history.state?.modal === "more-sheet") {
+      window.history.back();
+    }
+    setTimeout(() => {
+      moreBtnRef.current?.focus();
+    }, 50);
+  };
+
+  const openMore = () => {
+    setIsMoreOpen(true);
+    if (typeof window !== "undefined") {
+      window.history.pushState({ modal: "more-sheet" }, "");
+    }
+  };
+
+  // Android back gesture & popstate listener
+  useEffect(() => {
+    const handlePopState = () => {
+      if (isMoreOpen) {
+        setIsMoreOpen(false);
+        moreBtnRef.current?.focus();
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [isMoreOpen]);
+
+  // Escape key & focus trap for More bottom sheet
+  useEffect(() => {
+    if (!isMoreOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        closeMore();
+      }
+      if (e.key === "Tab" && moreSheetRef.current) {
+        const focusable = moreSheetRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (!focusable || focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isMoreOpen]);
+
+  // Swipe-down gesture detection on More sheet
+  const touchStartY = useRef<number | null>(null);
+  const touchCurrentY = useRef<number | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartY.current = e.touches[0].clientY;
+    touchCurrentY.current = e.touches[0].clientY;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    touchCurrentY.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = () => {
+    if (touchStartY.current !== null && touchCurrentY.current !== null) {
+      const diff = touchCurrentY.current - touchStartY.current;
+      if (diff > 60) {
+        closeMore();
+      }
+    }
+    touchStartY.current = null;
+    touchCurrentY.current = null;
+  };
+
+  // Tab list definitions for 6 destinations + More
+  const allDestinations = [
+    { id: "priority", label: "Priority", icon: Sparkles, color: "text-amber-500" },
+    { id: "timeline", label: "Timeline", icon: Clock, color: "text-blue-500" },
+    { id: "captures", label: "Inbox", icon: Inbox, color: "text-emerald-500", count: captures.length },
+    { id: "ask", label: "Ask", icon: Bot, color: "text-indigo-500" },
+    { id: "graph", label: "Graph", icon: Network, color: "text-purple-500" },
+    { id: "family", label: "Family", icon: Users, color: "text-emerald-500", badge: familyUnreadCount },
+  ] as const;
+
+  // Arrow key navigation between destinations (roving tabindex)
+  const handleTabKeyDown = (e: React.KeyboardEvent, index: number) => {
+    let nextIndex = index;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      nextIndex = (index + 1) % allDestinations.length;
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      nextIndex = (index - 1 + allDestinations.length) % allDestinations.length;
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      nextIndex = 0;
+    } else if (e.key === "End") {
+      e.preventDefault();
+      nextIndex = allDestinations.length - 1;
+    } else {
+      return;
+    }
+    const nextDestination = allDestinations[nextIndex];
+    setActiveTab(nextDestination.id as any);
+    document.getElementById(`tab-${nextDestination.id}`)?.focus();
+  };
+
+  const isMoreActive = activeTab === "graph" || activeTab === "family";
+  const formattedDate = new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+
   return (
-    <div className="min-h-screen bg-[#FDFBF7] dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] pb-32 transition-colors w-full max-w-full overflow-x-clip min-w-0">
-      {/* Floating Toast notification */}
+    <div className="min-h-screen bg-[#FDFBF7] dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7]">
+      {/* Toast Notification Banner */}
       {toastMessage && (
-        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] px-4 py-2.5 rounded-full text-xs font-medium shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3">
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] px-4 py-2.5 rounded-full shadow-2xl text-xs font-medium flex items-center gap-2 animate-in fade-in slide-in-from-top-3">
           <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-          <span>{toastMessage}</span>
+          {toastMessage}
         </div>
       )}
 
-      {/* Header */}
-      <header className="w-full sticky top-0 z-20 backdrop-blur-md bg-[#FDFBF7]/95 dark:bg-[#1C1917]/95 border-b border-[#E7E5E4]/60 dark:border-[#2E2A27]/60">
-        <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 pt-3.5 sm:pt-6 pb-3 sm:pb-4 flex flex-col gap-2.5 sm:gap-3.5">
-          {/* Row 1: Brand & User Profile Cluster */}
-          <div className="w-full flex items-center justify-between gap-2 min-w-0">
-            <div className="shrink min-w-0">
-              <h1 className="text-xl sm:text-2xl font-normal font-serif tracking-tight text-[#1C1917] dark:text-[#FDFBF7]">
+      {/* ────────────────────────────────────────────────────────────────────
+          UNIFIED NAVIGATION CHROME (Option B) - One DOM restyled by CSS
+          Under 600px: Fixed bottom bar, 64px + safe area; top phone header
+          600-839px (or landscape phone): 80px rail
+          840px+: 256px sidebar
+          ──────────────────────────────────────────────────────────────────── */}
+      <header className="w-[80px] app-chrome">
+        {/* Brand & Actions Container */}
+        <div className="chrome-top-bar">
+          {/* Brand section */}
+          <div className="brand-container">
+            <div className="w-8 h-8 rounded-xl bg-amber-500 flex items-center justify-center text-white shrink-0 shadow-xs">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="brand-title text-xl font-serif font-bold tracking-tight text-[#1C1917] dark:text-[#FDFBF7]">
                 LifeLoop
               </h1>
-              <p className="text-[11px] sm:text-xs text-[#78716C] dark:text-[#A8A29E] mt-0.5">
-                {new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+              <p className="landscape-hide text-[11px] sm:text-xs text-[#78716C] dark:text-[#A8A29E] mt-0.5">
+                {formattedDate}
               </p>
             </div>
-
-            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 justify-end min-w-0">
-              {/* Settings button adjusted just before the profile button */}
-              <button
-                id="reminder-preferences-btn"
-                onClick={() => setIsPreferencesOpen(true)}
-                className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors shrink-0 text-[#78716C] dark:text-[#A8A29E] flex items-center justify-center min-w-[36px] min-h-[36px]"
-                title="Reminder Preferences"
-                aria-label="Reminder Preferences"
-              >
-                <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
-              </button>
-
-              {/* Profile badge with dropdown popover showing Preferences and Logout */}
-              {user && (
-                <div className="relative shrink min-w-0" ref={profileMenuRef}>
-                  <button
-                    id="user-profile-menu-btn"
-                    onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-                    className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-full bg-stone-100 dark:bg-stone-800 hover:bg-stone-200/80 dark:hover:bg-stone-700/80 border border-stone-200 dark:border-stone-700 text-xs font-medium max-w-[95px] sm:max-w-[160px] min-w-0 cursor-pointer transition-colors"
-                    title={`Account menu (${user.email})`}
-                    aria-expanded={isProfileMenuOpen}
-                    aria-haspopup="true"
-                  >
-                    <div className="w-4 h-4 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center text-[10px] font-bold uppercase shrink-0">
-                      {user.email ? user.email[0] : "U"}
-                    </div>
-                    <span className="truncate min-w-0 flex-1 text-[11px] sm:text-xs text-stone-700 dark:text-stone-300">
-                      {user.email}
-                    </span>
-                    <ChevronDown className={`w-3 h-3 text-stone-400 shrink-0 transition-transform duration-200 ${isProfileMenuOpen ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {/* Popover Dropdown */}
-                  {isProfileMenuOpen && (
-                    <div
-                      id="profile-popover"
-                      className="absolute right-0 top-full mt-2 w-52 sm:w-56 bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] rounded-2xl shadow-xl py-1.5 z-50 animate-in fade-in slide-in-from-top-2"
-                    >
-                      <div className="px-3.5 py-2.5 border-b border-[#F5F5F4] dark:border-[#383330]">
-                        <p className="text-[10px] font-semibold text-[#A8A29E] uppercase tracking-wider">Signed in as</p>
-                        <p className="text-xs font-medium text-[#1C1917] dark:text-[#FDFBF7] truncate mt-0.5">{user.email}</p>
-                      </div>
-                      <div className="p-1.5 space-y-0.5">
-                        <button
-                          id="profile-preferences-btn"
-                          onClick={() => {
-                            setIsProfileMenuOpen(false);
-                            setIsPreferencesOpen(true);
-                          }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[#1C1917] dark:text-[#FDFBF7] hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition-colors text-left"
-                          title="Reminder Preferences"
-                          aria-label="Reminder Preferences"
-                        >
-                          <Settings className="w-4 h-4 text-amber-500 shrink-0" />
-                          <span className="font-medium">Preferences</span>
-                        </button>
-                        <button
-                          id="logout-btn"
-                          onClick={() => {
-                            setIsProfileMenuOpen(false);
-                            logout();
-                          }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[#78716C] hover:text-red-600 dark:hover:text-red-400 rounded-xl hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors text-left"
-                          title="Log Out"
-                          aria-label="Log Out"
-                        >
-                          <LogOut className="w-4 h-4 text-red-500 shrink-0" />
-                          <span className="font-medium">Log out</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
           </div>
 
-          {/* Row 2: Segmented Filter Tabs (adjusts width according to screen width with touch scroll affordances) */}
-          <div className="relative w-full">
-            {/* Left Scroll Button */}
-            {canScrollLeft && (
-              <button
-                type="button"
-                onClick={() => {
-                  tabBarRef.current?.scrollBy({ left: -140, behavior: "smooth" });
-                }}
-                className="absolute -left-1.5 top-1/2 -translate-y-1/2 z-20 w-7 h-7 rounded-full bg-white dark:bg-[#292524] shadow-md border border-stone-200 dark:border-stone-700 flex items-center justify-center text-stone-700 dark:text-stone-200 hover:scale-110 active:scale-95 transition-transform"
-                title="Scroll tabs left"
-                aria-label="Scroll tabs left"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-            )}
-
-            <div 
-              ref={tabBarRef}
-              onScroll={checkTabBarScroll}
-              className="w-full overflow-x-auto no-scrollbar bg-stone-200/70 dark:bg-stone-800/70 p-1 rounded-xl text-xs font-medium scroll-smooth"
+          {/* Settings & Profile Actions */}
+          <div className="actions-container">
+            <button
+              id="reminder-preferences-btn"
+              type="button"
+              onClick={() => setIsPreferencesOpen(true)}
+              className="touch-target-48 min-w-[48px] min-h-[48px] flex items-center justify-center p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-[#78716C] dark:text-[#A8A29E] shrink-0"
+              title="Reminder Preferences"
+              aria-label="Reminder Preferences"
             >
-              <div className="flex items-center gap-1 min-w-max sm:min-w-0 sm:w-full pr-8 sm:pr-0">
+              <Settings className="w-5 h-5" />
+            </button>
+
+            {user && (
+              <div className="relative shrink-0" ref={profileMenuRef}>
                 <button
-                  id="tab-priority"
-                  onClick={() => setActiveTab("priority")}
-                  className={`px-2.5 sm:px-3 py-1.5 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap sm:flex-1 ${
-                    activeTab === "priority"
-                      ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm rounded-lg font-semibold"
-                      : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white rounded-lg"
-                  }`}
+                  id="user-profile-menu-btn"
+                  type="button"
+                  onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+                  className="touch-target-48 min-w-[48px] min-h-[48px] flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-stone-100 dark:bg-stone-800 hover:bg-stone-200/80 dark:hover:bg-stone-700/80 border border-stone-200 dark:border-stone-700 text-xs font-medium cursor-pointer transition-colors max-w-[160px]"
+                  title={`Account menu (${user.email})`}
+                  aria-expanded={isProfileMenuOpen}
+                  aria-haspopup="true"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                  Priority
+                  <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center text-xs font-bold uppercase shrink-0">
+                    {user.email ? user.email[0] : "U"}
+                  </div>
+                  <span className="hidden sm:inline truncate text-xs text-stone-700 dark:text-stone-300 max-w-[80px]">
+                    {user.email}
+                  </span>
+                  <ChevronDown className={`w-3 h-3 text-stone-400 shrink-0 transition-transform duration-200 ${isProfileMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
-                <button
-                  id="tab-timeline"
-                  onClick={() => setActiveTab("timeline")}
-                  className={`px-2.5 sm:px-3 py-1.5 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap sm:flex-1 ${
-                    activeTab === "timeline"
-                      ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm rounded-lg font-semibold"
-                      : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white rounded-lg"
-                  }`}
-                >
-                  <Clock className="w-3.5 h-3.5 text-blue-500" />
-                  Timeline
-                </button>
-                <button
-                  id="tab-captures"
-                  onClick={() => setActiveTab("captures")}
-                  className={`px-2.5 sm:px-3 py-1.5 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap sm:flex-1 ${
-                    activeTab === "captures"
-                      ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm rounded-lg font-semibold"
-                      : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white rounded-lg"
-                  }`}
-                >
-                  <Inbox className="w-3.5 h-3.5 text-emerald-500" />
-                  Inbox
-                  {captures.length > 0 && (
-                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-stone-300 dark:bg-stone-700 font-bold">
-                      {captures.length}
-                    </span>
-                  )}
-                </button>
-                <button
-                  id="tab-ask"
-                  onClick={() => { setActiveTab("ask"); setActiveEntity(null); }}
-                  className={`px-2.5 sm:px-3 py-1.5 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap sm:flex-1 ${
-                    activeTab === "ask"
-                      ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm rounded-lg font-semibold"
-                      : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white rounded-lg"
-                  }`}
-                >
-                  <Bot className="w-3.5 h-3.5 text-indigo-500" />
-                  Ask
-                </button>
-                <button
-                  id="tab-graph"
-                  onClick={() => { setActiveTab("graph"); setActiveEntity(null); }}
-                  className={`px-2.5 sm:px-3 py-1.5 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap sm:flex-1 ${
-                    activeTab === "graph"
-                      ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm rounded-lg font-semibold"
-                      : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white rounded-lg"
-                  }`}
-                >
-                  <Network className="w-3.5 h-3.5 text-purple-500" />
-                  Graph
-                </button>
-                <button
-                  id="tab-family"
-                  onClick={() => { setActiveTab("family"); setActiveEntity(null); }}
-                  className={`relative px-2.5 sm:px-3 py-1.5 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap sm:flex-1 ${
-                    activeTab === "family"
-                      ? "bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] shadow-sm rounded-lg font-semibold"
-                      : "text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white rounded-lg"
-                  }`}
-                >
-                  <Users className="w-3.5 h-3.5 text-emerald-500" />
-                  Family
-                  {familyUnreadCount > 0 && (
-                    <span className="ml-1 px-1.5 py-0.2 bg-red-500 text-white text-[9px] font-bold rounded-full">
-                      {familyUnreadCount > 9 ? "9+" : familyUnreadCount}
-                    </span>
-                  )}
-                </button>
+
+                {/* Profile popover dropdown */}
+                {isProfileMenuOpen && (
+                  <div
+                    id="profile-popover"
+                    className="absolute right-0 bottom-full sm:bottom-auto sm:top-full mb-2 sm:mb-0 sm:mt-2 w-52 sm:w-56 bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] rounded-2xl shadow-xl py-1.5 z-50 animate-in fade-in slide-in-from-bottom-2 sm:slide-in-from-top-2"
+                  >
+                    <div className="px-3.5 py-2.5 border-b border-[#F5F5F4] dark:border-[#383330]">
+                      <p className="text-[10px] font-semibold text-[#A8A29E] uppercase tracking-wider">Signed in as</p>
+                      <p className="text-xs font-medium text-[#1C1917] dark:text-[#FDFBF7] truncate mt-0.5">{user.email}</p>
+                    </div>
+                    <div className="p-1.5 space-y-0.5">
+                      <button
+                        id="profile-preferences-btn"
+                        type="button"
+                        onClick={() => {
+                          setIsProfileMenuOpen(false);
+                          setIsPreferencesOpen(true);
+                        }}
+                        className="touch-target-48 min-h-[48px] w-full flex items-center gap-2 px-3 py-2 text-xs text-[#1C1917] dark:text-[#FDFBF7] hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition-colors text-left"
+                        title="Reminder Preferences"
+                        aria-label="Reminder Preferences"
+                      >
+                        <Settings className="w-4 h-4 text-amber-500 shrink-0" />
+                        <span className="font-medium">Preferences</span>
+                      </button>
+                      <button
+                        id="logout-btn"
+                        type="button"
+                        onClick={() => {
+                          setIsProfileMenuOpen(false);
+                          logout();
+                        }}
+                        className="touch-target-48 min-h-[48px] w-full flex items-center gap-2 px-3 py-2 text-xs text-[#78716C] hover:text-red-600 dark:hover:text-red-400 rounded-xl hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors text-left"
+                        title="Log Out"
+                        aria-label="Log Out"
+                      >
+                        <LogOut className="w-4 h-4 text-red-500 shrink-0" />
+                        <span className="font-medium">Log out</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-
-            {/* Right Scroll Button */}
-            {canScrollRight && (
-              <button
-                type="button"
-                onClick={() => {
-                  tabBarRef.current?.scrollBy({ left: 140, behavior: "smooth" });
-                }}
-                className="absolute -right-1.5 top-1/2 -translate-y-1/2 z-20 w-7 h-7 rounded-full bg-white dark:bg-[#292524] shadow-md border border-stone-200 dark:border-stone-700 flex items-center justify-center text-stone-700 dark:text-stone-200 hover:scale-110 active:scale-95 transition-transform"
-                title="Scroll tabs right"
-                aria-label="Scroll tabs right"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
             )}
-          </div>
-
-          {/* Row 3: Search Bar located directly under the tab bar */}
-          <div className="relative w-full">
-            <Search className="w-4 h-4 text-[#A8A29E] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              id="search-input"
-              type="text"
-              placeholder="Search bills, renewals, tasks..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] rounded-xl text-xs placeholder:text-[#A8A29E] text-[#1C1917] dark:text-[#FDFBF7] focus:outline-none focus:ring-1 focus:ring-amber-500 transition-all shadow-xs"
-            />
           </div>
         </div>
+
+        {/* Tablist navigation (Priority, Timeline, Inbox, Ask, More; Graph & Family in More sheet on phone) */}
+        <nav role="tablist" aria-label="Main Destinations" className="chrome-tablist">
+          {/* 1. Priority */}
+          <button
+            type="button"
+            id="tab-priority"
+            role="tab"
+            aria-selected={activeTab === "priority"}
+            aria-controls="panel-priority"
+            tabIndex={activeTab === "priority" ? 0 : -1}
+            onKeyDown={(e) => handleTabKeyDown(e, 0)}
+            onClick={() => setActiveTab("priority")}
+            className={`chrome-tab-item touch-target-48 ${
+              activeTab === "priority"
+                ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
+                : "text-[#78716C] dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white"
+            }`}
+          >
+            <Sparkles className="w-5 h-5 text-amber-500 shrink-0" />
+            <span>Priority</span>
+          </button>
+
+          {/* 2. Timeline */}
+          <button
+            type="button"
+            id="tab-timeline"
+            role="tab"
+            aria-selected={activeTab === "timeline"}
+            aria-controls="panel-timeline"
+            tabIndex={activeTab === "timeline" ? 0 : -1}
+            onKeyDown={(e) => handleTabKeyDown(e, 1)}
+            onClick={() => setActiveTab("timeline")}
+            className={`chrome-tab-item touch-target-48 ${
+              activeTab === "timeline"
+                ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
+                : "text-[#78716C] dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white"
+            }`}
+          >
+            <Clock className="w-5 h-5 text-blue-500 shrink-0" />
+            <span>Timeline</span>
+          </button>
+
+          {/* 3. Inbox (Captures) */}
+          <button
+            type="button"
+            id="tab-captures"
+            role="tab"
+            aria-selected={activeTab === "captures"}
+            aria-controls="panel-captures"
+            tabIndex={activeTab === "captures" ? 0 : -1}
+            onKeyDown={(e) => handleTabKeyDown(e, 2)}
+            onClick={() => setActiveTab("captures")}
+            className={`chrome-tab-item touch-target-48 relative ${
+              activeTab === "captures"
+                ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
+                : "text-[#78716C] dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white"
+            }`}
+          >
+            <Inbox className="w-5 h-5 text-emerald-500 shrink-0" />
+            <span>Inbox</span>
+            {captures.length > 0 && (
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-stone-300 dark:bg-stone-700 font-bold">
+                {captures.length}
+              </span>
+            )}
+          </button>
+
+          {/* 4. Ask */}
+          <button
+            type="button"
+            id="tab-ask"
+            role="tab"
+            aria-selected={activeTab === "ask"}
+            aria-controls="panel-ask"
+            tabIndex={activeTab === "ask" ? 0 : -1}
+            onKeyDown={(e) => handleTabKeyDown(e, 3)}
+            onClick={() => {
+              setActiveTab("ask");
+              setActiveEntity(null);
+            }}
+            className={`chrome-tab-item touch-target-48 ${
+              activeTab === "ask"
+                ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
+                : "text-[#78716C] dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white"
+            }`}
+          >
+            <Bot className="w-5 h-5 text-indigo-500 shrink-0" />
+            <span>Ask</span>
+          </button>
+
+          {/* 5. More button (phone only, opens bottom sheet dialog) */}
+          <button
+            type="button"
+            id="tab-more"
+            ref={moreBtnRef}
+            aria-haspopup="dialog"
+            aria-expanded={isMoreOpen}
+            aria-label="More navigation options"
+            aria-selected={isMoreActive}
+            onClick={() => {
+              if (isMoreOpen) closeMore();
+              else openMore();
+            }}
+            className={`chrome-tab-item touch-target-48 ${
+              isMoreActive
+                ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
+                : "text-[#78716C] dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white"
+            }`}
+          >
+            <MoreHorizontal className={`w-5 h-5 shrink-0 ${isMoreActive ? "text-amber-500" : ""}`} />
+            <span>More</span>
+          </button>
+
+          {/* Graph & Family Container (More sheet on phone, inline in rail/sidebar) */}
+          <div
+            id="more-sheet-wrapper"
+            className={isMoreOpen ? "sheet-open" : ""}
+            role={isMoreOpen ? "dialog" : undefined}
+            aria-modal={isMoreOpen ? "true" : undefined}
+            aria-labelledby={isMoreOpen ? "more-sheet-title" : undefined}
+          >
+            {/* Backdrop for phone bottom sheet */}
+            <div
+              id="more-sheet-backdrop"
+              className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity duration-200"
+              onClick={closeMore}
+              aria-hidden="true"
+            />
+
+            {/* Bottom sheet content */}
+            <div
+              id="more-sheet-content"
+              ref={moreSheetRef}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+            >
+              {/* Swipe handle for phone */}
+              <div id="more-sheet-handle" className="w-12 h-1.5 bg-stone-300 dark:bg-stone-700 rounded-full mx-auto mb-4" />
+
+              {/* Header for phone sheet */}
+              <div id="more-sheet-header" className="flex items-center justify-between mb-4">
+                <h3 id="more-sheet-title" className="text-base font-semibold text-[#1C1917] dark:text-[#FDFBF7]">
+                  More Views
+                </h3>
+                <button
+                  type="button"
+                  onClick={closeMore}
+                  className="touch-target-48 min-w-[48px] min-h-[48px] p-2 text-stone-500 hover:text-stone-900 dark:hover:text-white rounded-full flex items-center justify-center"
+                  aria-label="Close dialog"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* 5. Graph Tab */}
+              <button
+                type="button"
+                id="tab-graph"
+                role="tab"
+                aria-selected={activeTab === "graph"}
+                aria-controls="panel-graph"
+                tabIndex={activeTab === "graph" ? 0 : -1}
+                onKeyDown={(e) => handleTabKeyDown(e, 4)}
+                onClick={() => {
+                  setActiveTab("graph");
+                  setActiveEntity(null);
+                  if (isMoreOpen) closeMore();
+                }}
+                className={`chrome-tab-item touch-target-48 ${
+                  activeTab === "graph"
+                    ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
+                    : "text-[#78716C] dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white"
+                }`}
+              >
+                <Network className="w-5 h-5 text-purple-500 shrink-0" />
+                <span>Graph</span>
+              </button>
+
+              {/* 6. Family Tab */}
+              <button
+                type="button"
+                id="tab-family"
+                role="tab"
+                aria-selected={activeTab === "family"}
+                aria-controls="panel-family"
+                tabIndex={activeTab === "family" ? 0 : -1}
+                onKeyDown={(e) => handleTabKeyDown(e, 5)}
+                onClick={() => {
+                  setActiveTab("family");
+                  setActiveEntity(null);
+                  if (isMoreOpen) closeMore();
+                }}
+                className={`chrome-tab-item touch-target-48 relative ${
+                  activeTab === "family"
+                    ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
+                    : "text-[#78716C] dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white"
+                }`}
+              >
+                <Users className="w-5 h-5 text-emerald-500 shrink-0" />
+                <span>Family</span>
+                {familyUnreadCount > 0 && (
+                  <span className="px-1.5 py-0.2 bg-red-500 text-white text-[9px] font-bold rounded-full">
+                    {familyUnreadCount > 9 ? "9+" : familyUnreadCount}
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+        </nav>
       </header>
 
-      {/* Main Content Area */}
-      <main className="px-4 sm:px-6 max-w-4xl mx-auto mt-6 space-y-6 sm:space-y-8">
+      {/* ────────────────────────────────────────────────────────────────────
+          MAIN CONTENT AREA
+          Search scrolls with content (not sticky).
+          Same search element in every mode.
+          ──────────────────────────────────────────────────────────────────── */}
+      <main className="main-viewport max-w-4xl mx-auto px-4 sm:px-6 pt-4 pb-8 space-y-6">
+        {/* Search Bar - Single element in every mode, scrolls with feed */}
+        <div className="relative w-full">
+          <Search className="w-4 h-4 text-[#A8A29E] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            id="search-input"
+            type="text"
+            placeholder="Search bills, renewals, tasks..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 min-h-[48px] py-2 bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] rounded-xl text-base placeholder:text-[#A8A29E] text-[#1C1917] dark:text-[#FDFBF7] focus:outline-none focus:ring-1 focus:ring-amber-500 transition-all shadow-xs"
+          />
+        </div>
+
         {loading && (
           <div className="flex items-center justify-center py-20 text-[#A8A29E]">
             <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading LifeLoop...
@@ -585,7 +753,13 @@ export function Dashboard() {
         {/*        -> 4. Waiting For Placeholder                */}
         {/* ---------------------------------------------------- */}
         {!loading && activeTab === "priority" && (
-          <div className="space-y-8">
+          <div
+            role="tabpanel"
+            id="panel-priority"
+            aria-labelledby="tab-priority"
+            tabIndex={0}
+            className="focus:outline-none space-y-8"
+          >
             {/* Family Sharing Banner (Conditional) */}
             {!isFamilyBannerDismissed && (familyUnreadCount > 0 || items.some(i => i.isFamilyShared || (i.metadata as any)?.isFamilyShared)) && (
               <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/60 rounded-xl p-3.5 flex items-center justify-between text-xs gap-3">
@@ -599,12 +773,14 @@ export function Dashboard() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <button
+                    type="button"
                     onClick={() => { setActiveTab("family"); setActiveEntity(null); }}
                     className="text-amber-800 dark:text-amber-300 font-semibold hover:underline"
                   >
                     View
                   </button>
                   <button
+                    type="button"
                     onClick={() => setIsFamilyBannerDismissed(true)}
                     className="p-1 text-amber-700/60 dark:text-amber-400/60 hover:text-amber-900 dark:hover:text-amber-200 rounded"
                     title="Dismiss alert"
@@ -670,22 +846,25 @@ export function Dashboard() {
 
                           <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-[#F5F5F4] dark:border-[#383330]">
                             <button
+                              type="button"
                               onClick={() => handleToggleComplete(item.id, true)}
-                              className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:text-emerald-800"
+                              className="touch-target-48 inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:text-emerald-800"
                             >
                               <CheckCircle2 className="w-3.5 h-3.5" />
                               Done
                             </button>
                             <button
+                              type="button"
                               onClick={() => handleSnooze(item.id, 1)}
-                              className="inline-flex items-center gap-1 text-[11px] text-[#78716C] hover:text-[#1C1917] dark:hover:text-white"
+                              className="touch-target-48 inline-flex items-center gap-1 text-[11px] text-[#78716C] hover:text-[#1C1917] dark:hover:text-white"
                             >
                               <Clock className="w-3.5 h-3.5" />
                               +1d
                             </button>
                             <button
+                              type="button"
                               onClick={() => setEditingItem(item)}
-                              className="text-[11px] text-[#78716C] hover:text-[#1C1917] dark:hover:text-white"
+                              className="touch-target-48 text-[11px] text-[#78716C] hover:text-[#1C1917] dark:hover:text-white"
                             >
                               Edit
                             </button>
@@ -698,7 +877,7 @@ export function Dashboard() {
               );
             })()}
 
-            {/* 1. NEEDS ATTENTION (Urgent, Overdue, AI Review) */}
+            {/* 1. NEEDS ATTENTION */}
             {timeline.needsAttention.length > 0 && (
               <section id="section-needs-attention" className="space-y-3">
                 <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
@@ -814,10 +993,15 @@ export function Dashboard() {
 
         {/* ---------------------------------------------------- */}
         {/* VIEW 2: CHRONOLOGICAL LIFE TIMELINE                  */}
-        {/* Sections: Today, Tomorrow, This Week, Upcoming, Past */}
         {/* ---------------------------------------------------- */}
         {!loading && activeTab === "timeline" && (
-          <div className="space-y-8">
+          <div
+            role="tabpanel"
+            id="panel-timeline"
+            aria-labelledby="tab-timeline"
+            tabIndex={0}
+            className="focus:outline-none space-y-8"
+          >
             {/* TODAY */}
             <div className="space-y-3">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-[#A8A29E] flex items-center gap-1.5">
@@ -914,6 +1098,28 @@ export function Dashboard() {
               )}
             </div>
 
+            {/* WAITING FOR */}
+            {timeline.waitingFor.length > 0 && (
+              <div className="space-y-3">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-[#A8A29E] flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-purple-500" />
+                  Waiting For ({timeline.waitingFor.length})
+                </h2>
+                <div className="space-y-2.5 pl-3 border-l-2 border-purple-200 dark:border-purple-900/60">
+                  {timeline.waitingFor.map((item) => (
+                    <ItemCard
+                      key={item.id}
+                      item={item}
+                      onToggleComplete={handleToggleComplete}
+                      onSnooze={handleSnooze}
+                      onEdit={setEditingItem}
+                      onDelete={handleDeleteItem}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* PAST / COMPLETED */}
             {timeline.past.length > 0 && (
               <div className="space-y-3 pt-4 border-t border-stone-200 dark:border-stone-800">
@@ -940,10 +1146,15 @@ export function Dashboard() {
 
         {/* ---------------------------------------------------- */}
         {/* VIEW 3: RAW CAPTURES INBOX                           */}
-        {/* Original unparsed sources & media files             */}
         {/* ---------------------------------------------------- */}
         {!loading && activeTab === "captures" && (
-          <div className="space-y-4">
+          <div
+            role="tabpanel"
+            id="panel-captures"
+            aria-labelledby="tab-captures"
+            tabIndex={0}
+            className="focus:outline-none space-y-4"
+          >
             <div className="flex items-center justify-between">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-[#A8A29E]">
                 Raw Captures ({captures.length})
@@ -1003,8 +1214,9 @@ export function Dashboard() {
 
                     <div className="flex items-center gap-2 self-end sm:self-center">
                       <button
+                        type="button"
                         onClick={() => handleDeleteCapture(capture.id)}
-                        className="text-xs text-stone-400 hover:text-red-500 transition-colors p-1"
+                        className="touch-target-48 text-xs text-stone-400 hover:text-red-500 transition-colors p-2"
                       >
                         Delete
                       </button>
@@ -1020,19 +1232,34 @@ export function Dashboard() {
         {/* VIEW 4: ASK MY LIFE (RAG / AI)                       */}
         {/* ---------------------------------------------------- */}
         {!loading && activeTab === "ask" && (
-           <AskView 
-             onEditItem={setEditingItem}
-             onToggleComplete={handleToggleComplete}
-             onSnooze={handleSnooze}
-             onDelete={handleDeleteItem}
-           />
+          <div
+            role="tabpanel"
+            id="panel-ask"
+            aria-labelledby="tab-ask"
+            tabIndex={0}
+            className="focus:outline-none"
+          >
+            <AskView 
+              onEditItem={setEditingItem}
+              onToggleComplete={handleToggleComplete}
+              onSnooze={handleSnooze}
+              onDelete={handleDeleteItem}
+            />
+          </div>
         )}
 
         {/* ---------------------------------------------------- */}
         {/* VIEW 5: LIFE GRAPH (Entities)                        */}
         {/* ---------------------------------------------------- */}
         {!loading && activeTab === "graph" && (
-           activeEntity ? (
+          <div
+            role="tabpanel"
+            id="panel-graph"
+            aria-labelledby="tab-graph"
+            tabIndex={0}
+            className="focus:outline-none"
+          >
+            {activeEntity ? (
               <EntityDetailView 
                 entity={activeEntity}
                 onBack={() => setActiveEntity(null)}
@@ -1041,35 +1268,52 @@ export function Dashboard() {
                 onSnooze={handleSnooze}
                 onDelete={handleDeleteItem}
               />
-           ) : (
+            ) : (
               <LifeGraphView 
                 onOpenEntity={setActiveEntity}
               />
-           )
+            )}
+          </div>
         )}
 
         {/* ---------------------------------------------------- */}
         {/* VIEW 6: FAMILY                                        */}
         {/* ---------------------------------------------------- */}
         {activeTab === "family" && (
-          <FamilyPage />
+          <div
+            role="tabpanel"
+            id="panel-family"
+            aria-labelledby="tab-family"
+            tabIndex={0}
+            className="focus:outline-none"
+          >
+            <FamilyPage />
+          </div>
         )}
       </main>
 
-      {/* 5. CAPTURE BUTTON (Floating Action Button) */}
-      <div className="fixed bottom-6 right-6 z-40" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+      {/* ────────────────────────────────────────────────────────────────────
+          FLOATING ACTION BUTTON (Quick Capture)
+          Above bottom bar on phones (calc(64px + 16px + safe area)), 16px on rail/sidebar
+          Hidden on Ask tab
+          ──────────────────────────────────────────────────────────────────── */}
+      <div className={`fab-button-container ${activeTab === "ask" ? "hidden" : ""}`}>
         <button
           id="global-capture-btn"
+          type="button"
           onClick={() => setIsCaptureOpen(true)}
-          className="flex items-center gap-2 bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] p-3.5 sm:px-5 sm:py-3.5 rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-150 border border-black/10 dark:border-white/10 text-xs font-semibold"
+          className="touch-target-48 min-w-[48px] min-h-[48px] flex items-center justify-center gap-2 bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] p-3.5 sm:px-5 sm:py-3.5 rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-150 border border-black/10 dark:border-white/10 text-xs font-semibold cursor-pointer"
           title="Quick Capture"
+          aria-label="Quick Capture"
         >
           <Plus className="w-5 h-5 stroke-[2.5]" />
           <span className="hidden sm:inline font-semibold">Capture</span>
         </button>
       </div>
 
-      {/* 6. MODALS */}
+      {/* ────────────────────────────────────────────────────────────────────
+          MODALS
+          ──────────────────────────────────────────────────────────────────── */}
       <CaptureDialog
         isOpen={isCaptureOpen}
         onClose={() => setIsCaptureOpen(false)}

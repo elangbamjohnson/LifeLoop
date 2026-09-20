@@ -152,3 +152,22 @@ export async function authenticateAndSeedSession(page: Page, request: APIRequest
 
   return { email: testEmail, password: testPassword };
 }
+
+/**
+ * Navigates to a tab by id.
+ * On phones (<600px), 'graph' and 'family' destinations are opened via '#tab-more'.
+ */
+export async function navigateToTab(
+  page: Page,
+  tabId: 'priority' | 'timeline' | 'captures' | 'ask' | 'graph' | 'family'
+) {
+  if (tabId === 'graph' || tabId === 'family') {
+    const moreBtn = page.locator('#tab-more');
+    if (await moreBtn.isVisible()) {
+      await moreBtn.click();
+      await page.locator(`#tab-${tabId}`).click();
+      return;
+    }
+  }
+  await page.locator(`#tab-${tabId}`).click();
+}
