@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { ArrowLeft, Plus, Link as LinkIcon, Edit3, X, Unlink } from "lucide-react";
 import { TimelineItem } from "../../../shared/utils/timeline";
 import { ItemCard } from "./ItemCard";
+import { getTabClientId } from "../../utils/tabId";
 
 interface EntityDetailViewProps {
   entity: TimelineItem;
@@ -87,7 +88,7 @@ export function EntityDetailView({
     try {
       const res = await fetch("/api/v1/relations", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Client-Id": getTabClientId() },
         body: JSON.stringify({
           sourceItemId: selectedItemId,
           targetItemId: entity.id,
@@ -113,7 +114,10 @@ export function EntityDetailView({
     );
     if (!rel) return;
     try {
-      await fetch(`/api/v1/relations/${rel.id}`, { method: "DELETE" });
+      await fetch(`/api/v1/relations/${rel.id}`, {
+        method: "DELETE",
+        headers: { "X-Client-Id": getTabClientId() },
+      });
       fetchConnections();
     } catch (e) {
       console.error(e);

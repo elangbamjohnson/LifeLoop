@@ -2,6 +2,7 @@ import { db } from "../../db";
 import { reminders, items, users } from "../../db/schema";
 import { eq, and, lte, or } from "drizzle-orm";
 import { notificationDispatcher } from "./NotificationProvider";
+import { eventBus } from "./EventBus";
 
 export interface CreateReminderParams {
   userId: string;
@@ -143,6 +144,13 @@ export class ReminderService {
       })
       .returning();
 
+    eventBus.publish(params.userId, {
+      type: "changed",
+      entity: "reminder",
+      id: newReminder.id,
+      at: new Date().toISOString(),
+    });
+
     return newReminder;
   }
 
@@ -189,6 +197,14 @@ export class ReminderService {
       }
     }
 
+    if (created.length > 0) {
+      eventBus.publish(userId, {
+        type: "changed",
+        entity: "reminder",
+        at: new Date().toISOString(),
+      });
+    }
+
     return created;
   }
 
@@ -222,6 +238,14 @@ export class ReminderService {
       updated.push(u);
     }
 
+    if (updated.length > 0 && existing[0]?.userId) {
+      eventBus.publish(existing[0].userId, {
+        type: "changed",
+        entity: "reminder",
+        at: new Date().toISOString(),
+      });
+    }
+
     return updated;
   }
 
@@ -239,6 +263,15 @@ export class ReminderService {
       .where(eq(reminders.id, reminderId))
       .returning();
 
+    if (updated) {
+      eventBus.publish(updated.userId, {
+        type: "changed",
+        entity: "reminder",
+        id: updated.id,
+        at: new Date().toISOString(),
+      });
+    }
+
     return updated;
   }
 
@@ -254,6 +287,20 @@ export class ReminderService {
       })
       .where(and(eq(items.id, itemId), eq(items.userId, userId)))
       .returning();
+
+    if (updatedItem) {
+      eventBus.publish(userId, {
+        type: "changed",
+        entity: "item",
+        id: updatedItem.id,
+        at: new Date().toISOString(),
+      });
+      eventBus.publish(userId, {
+        type: "changed",
+        entity: "reminder",
+        at: new Date().toISOString(),
+      });
+    }
 
     return updatedItem;
   }
@@ -284,6 +331,18 @@ export class ReminderService {
         .set({ status: "scheduled" })
         .where(eq(reminders.itemId, itemId));
     }
+
+    eventBus.publish(userId, {
+      type: "changed",
+      entity: "item",
+      id: updatedItem.id,
+      at: new Date().toISOString(),
+    });
+    eventBus.publish(userId, {
+      type: "changed",
+      entity: "reminder",
+      at: new Date().toISOString(),
+    });
 
     return updatedItem;
   }
@@ -331,6 +390,12 @@ export class ReminderService {
         }
 
         results.push(result);
+        eventBus.publish(reminder.userId, {
+          type: "changed",
+          entity: "reminder",
+          id: reminder.id,
+          at: new Date().toISOString(),
+        });
       } catch (err: any) {
         console.error(`Failed to dispatch reminder ${reminder.id}:`, err);
       }

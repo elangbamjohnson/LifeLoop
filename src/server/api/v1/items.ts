@@ -4,6 +4,7 @@ import { items, reminders, sharedItems, familyMembers } from "../../../db/schema
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
 import { reminderService } from "../../services/ReminderService";
+import { eventBus } from "../../services/EventBus";
 import { groupItemsIntoTimeline, TimelineItem } from "../../../shared/utils/timeline";
 import { isValidUuid, applyUuidParamValidation } from "../../middlewares/validation";
 
@@ -33,6 +34,14 @@ itemsRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res, next) 
         metadata,
       })
       .returning();
+
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "item",
+      id: item.id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
 
     res.status(201).json({ item });
   } catch (error) {
@@ -209,6 +218,14 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
     } else if (status === "active") {
       await db.update(reminders).set({ status: "scheduled" }).where(eq(reminders.itemId, id));
     }
+
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "item",
+      id: updatedItem.id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
       
     res.json({ item: updatedItem });
   } catch (error) {
@@ -239,6 +256,15 @@ itemsRouter.post("/:id/snooze", requireAuth, async (req: AuthenticatedRequest, r
     if (!updated) {
       return res.status(404).json({ error: "Item not found" });
     }
+
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "item",
+      id: updated.id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
+
     res.json({ item: updated });
   } catch (error) {
     next(error);
@@ -258,6 +284,15 @@ itemsRouter.post("/:id/complete", requireAuth, async (req: AuthenticatedRequest,
     if (!updated) {
       return res.status(404).json({ error: "Item not found" });
     }
+
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "item",
+      id: updated.id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
+
     res.json({ item: updated });
   } catch (error) {
     next(error);
@@ -280,6 +315,14 @@ itemsRouter.delete("/:id", requireAuth, async (req: AuthenticatedRequest, res, n
     if (!deletedItem) {
       return res.status(404).json({ error: "Item not found" });
     }
+
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "item",
+      id: deletedItem.id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
     
     res.json({ success: true });
   } catch (error) {

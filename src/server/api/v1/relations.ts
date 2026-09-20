@@ -4,6 +4,7 @@ import { itemRelations, items } from "../../../db/schema";
 import { eq, or, and, desc } from "drizzle-orm";
 import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
 import { validateUuidParams, validateUuidBody, applyUuidParamValidation } from "../../middlewares/validation";
+import { eventBus } from "../../services/EventBus";
 
 export const relationsRouter = Router();
 applyUuidParamValidation(relationsRouter);
@@ -64,6 +65,14 @@ relationsRouter.post("/", requireAuth, validateUuidBody("sourceItemId", "targetI
       })
       .returning();
 
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "relation",
+      id: created.id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
+
     res.json(created);
   } catch (error) {
     next(error);
@@ -96,6 +105,14 @@ relationsRouter.patch("/:id", requireAuth, validateUuidParams("id"), async (req:
       .where(eq(itemRelations.id, id))
       .returning();
 
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "relation",
+      id: updated.id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
+
     res.json(updated);
   } catch (error) {
     next(error);
@@ -118,6 +135,15 @@ relationsRouter.delete("/:id", requireAuth, validateUuidParams("id"), async (req
     }
 
     await db.delete(itemRelations).where(eq(itemRelations.id, id));
+
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "relation",
+      id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
+
     res.json({ success: true });
   } catch (error) {
     next(error);

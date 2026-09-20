@@ -4,6 +4,7 @@ import { reminders, items, users } from "../../../db/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
 import { reminderService } from "../../services/ReminderService";
+import { eventBus } from "../../services/EventBus";
 import { validateUuidParams, validateUuidBody, isValidUuid, applyUuidParamValidation } from "../../middlewares/validation";
 
 export const remindersRouter = Router();
@@ -60,6 +61,14 @@ remindersRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res, ne
       timezone,
     });
 
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "reminder",
+      id: newReminder.id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
+
     res.status(201).json({ reminder: newReminder });
   } catch (error) {
     next(error);
@@ -96,6 +105,13 @@ remindersRouter.post("/standard-relative", requireAuth, validateUuidBody("itemId
       timezone || "UTC"
     );
 
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "reminder",
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
+
     res.status(201).json({ reminders: created });
   } catch (error) {
     next(error);
@@ -123,6 +139,15 @@ remindersRouter.post("/:id/snooze", requireAuth, validateUuidParams("id"), async
     }
 
     const updated = await reminderService.snoozeReminder(id, new Date(snoozeUntil));
+
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "reminder",
+      id: updated?.id || id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
+
     res.json({ reminder: updated });
   } catch (error) {
     next(error);
@@ -157,6 +182,14 @@ remindersRouter.patch("/:id", requireAuth, validateUuidParams("id"), async (req:
       .where(eq(reminders.id, id))
       .returning();
 
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "reminder",
+      id: updated.id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
+
     res.json({ reminder: updated });
   } catch (error) {
     next(error);
@@ -179,6 +212,15 @@ remindersRouter.delete("/:id", requireAuth, validateUuidParams("id"), async (req
     }
 
     await db.delete(reminders).where(eq(reminders.id, id));
+
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "reminder",
+      id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
+
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -232,6 +274,13 @@ remindersRouter.put("/preferences", requireAuth, async (req: AuthenticatedReques
       .update(users)
       .set({ settings: updatedSettings })
       .where(eq(users.id, req.userId!));
+
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "reminder",
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
 
     res.json({ success: true, preferences: updatedSettings });
   } catch (error) {

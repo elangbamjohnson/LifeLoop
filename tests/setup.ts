@@ -7,6 +7,7 @@ import { remindersRouter } from "../src/server/api/v1/reminders";
 import { askRouter } from "../src/server/api/v1/ask";
 import { relationsRouter } from "../src/server/api/v1/relations";
 import { familiesRouter } from "../src/server/api/v1/families";
+import { eventsRouter } from "../src/server/api/v1/events";
 import { healthRouter } from "../src/server/api/health";
 import { errorHandler } from "../src/server/middlewares/errorHandler";
 
@@ -37,6 +38,7 @@ export function createTestApp(customPath?: string, customRouter?: express.Router
   app.use("/api/v1/ask", askRouter);
   app.use("/api/v1/relations", relationsRouter);
   app.use("/api/v1/families", familiesRouter);
+  app.use("/api/v1/events", eventsRouter);
 
   const standardPaths = [
     "/api/v1/auth",
@@ -45,7 +47,8 @@ export function createTestApp(customPath?: string, customRouter?: express.Router
     "/api/v1/reminders",
     "/api/v1/ask",
     "/api/v1/relations",
-    "/api/v1/families"
+    "/api/v1/families",
+    "/api/v1/events"
   ];
   if (customPath && customRouter && !standardPaths.includes(customPath)) {
     app.use(customPath, customRouter);

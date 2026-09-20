@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { TimelineItem } from "../../../shared/utils/timeline";
 import { ItemCardActions } from "./ItemCardActions";
+import { getTabClientId } from "../../utils/tabId";
 
 interface ItemCardProps {
   key?: React.Key;
@@ -336,7 +337,7 @@ export const ItemCard: React.FC<ItemCardProps> = ({
                   e.stopPropagation();
                   fetch('/api/v1/relations', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Client-Id': getTabClientId() },
                     body: JSON.stringify({
                       sourceItemId: item.id,
                       targetItemId: item.metadata?.suggestedRelationTargetId,

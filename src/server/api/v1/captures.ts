@@ -7,6 +7,7 @@ import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
 import { validateUuidParams, applyUuidParamValidation } from "../../middlewares/validation";
 import { storage } from "../../services/StorageProvider";
 import { aiProvider } from "../../services/AIProvider";
+import { eventBus } from "../../services/EventBus";
 
 export const capturesRouter = Router();
 applyUuidParamValidation(capturesRouter);
@@ -65,6 +66,14 @@ capturesRouter.post("/", requireAuth, upload.single("file"), async (req: Authent
       throw insertError;
     }
 
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "capture",
+      id: capture.id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
+
     res.status(201).json({ capture });
 
     // Kick off async processing (fire and forget for now)
@@ -83,6 +92,17 @@ async function processCaptureAsync(captureId: string, userId: string, payload: s
     await db.update(captures).set({ processingStatus: "processing" }).where(eq(captures.id, captureId));
     await aiProvider.processCapture(captureId, userId, payload, type);
     await db.update(captures).set({ processingStatus: "completed" }).where(eq(captures.id, captureId));
+    eventBus.publish(userId, {
+      type: "changed",
+      entity: "capture",
+      id: captureId,
+      at: new Date().toISOString(),
+    });
+    eventBus.publish(userId, {
+      type: "changed",
+      entity: "item",
+      at: new Date().toISOString(),
+    });
   } catch (error) {
     if (logger) {
       logger.error(error, `Processing failed for ${captureId}`);
@@ -131,6 +151,14 @@ capturesRouter.delete("/:id", requireAuth, validateUuidParams("id"), async (req:
 
     await db.delete(captures).where(eq(captures.id, id));
     
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "capture",
+      id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
+
     res.json({ success: true });
   } catch (error) {
     next(error);
