@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { TimelineItem } from "../../../shared/utils/timeline";
+import { TimelineItem } from "../../shared/utils/timeline";
 
 export interface Capture {
   id: string;

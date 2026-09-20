@@ -50,10 +50,17 @@ describe('Route Inventory & Input Validation Coverage', () => {
 
     const routesWithIdParams: { routerName: string; method: string; path: string; fullPath: string; idParams: string[] }[] = [];
 
+    interface RouteLayer {
+      route?: {
+        path?: string;
+        methods?: Record<string, boolean>;
+      };
+    }
+
     for (const { name, prefix, router } of routers) {
-      const stack = router.stack || [];
+      const stack = (router.stack || []) as RouteLayer[];
       for (const layer of stack) {
-        if (layer.route && typeof layer.route.path === 'string') {
+        if (layer.route && typeof layer.route.path === 'string' && layer.route.methods) {
           const routePath = layer.route.path;
           const methods = Object.keys(layer.route.methods);
           const paramMatches = routePath.match(/:([a-zA-Z0-9_]+)/g) || [];

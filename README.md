@@ -51,6 +51,7 @@ Both server.ts (Express) and vite.config.ts (Vite dev server + HMR socket) read 
 
   npm install
   npm run dev          # starts on http://127.0.0.1:64532 by default
+  npm run check        # runs TypeScript typechecking
 
 ---
 
