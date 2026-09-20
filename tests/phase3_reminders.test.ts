@@ -8,6 +8,7 @@ import { remindersRouter } from "../src/server/api/v1/reminders";
 import { db } from "../src/db";
 import { users, items, reminders, notificationLogs } from "../src/db/schema";
 import { eq, and } from "drizzle-orm";
+import { v4 as uuidv4 } from "uuid";
 import { reminderService } from "../src/server/services/ReminderService";
 import { notificationDispatcher } from "../src/server/services/NotificationProvider";
 
@@ -27,7 +28,7 @@ describe("Phase 3: Reminders, Life Timeline & Real Dashboard", () => {
     const [user] = await db
       .insert(users)
       .values({
-        email: `phase3_${Date.now()}@lifeloop.com`,
+        email: `phase3_${uuidv4()}@example.com`,
         passwordHash: "dummy",
         settings: {
           timezone: "America/New_York",
@@ -49,7 +50,7 @@ describe("Phase 3: Reminders, Life Timeline & Real Dashboard", () => {
         title: "Electricity bill",
         itemType: "payment",
         status: "active",
-        dueDate: new Date("2026-09-18T14:00:00Z"),
+        dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
         metadata: { amount: 2840, currency: "INR" },
         confidenceScore: 0.95,
       })
@@ -388,7 +389,7 @@ describe("Phase 3: Reminders, Life Timeline & Real Dashboard", () => {
     // Create User B
     const [userB] = await db
       .insert(users)
-      .values({ email: `userb_rem_${Date.now()}@example.com`, passwordHash: "dummy" })
+      .values({ email: `userb_rem_${uuidv4()}@example.com`, passwordHash: "dummy" })
       .returning();
     const userBCookie = `session=${jwt.sign({ userId: userB.id }, JWT_SECRET)}`;
 
@@ -418,5 +419,11 @@ describe("Phase 3: Reminders, Life Timeline & Real Dashboard", () => {
     // Cleanup
     await db.delete(reminders).where(eq(reminders.id, userAReminder.id));
     await db.delete(users).where(eq(users.id, userB.id));
+  });
+
+  afterAll(async () => {
+    if (testUserId) {
+      await db.delete(users).where(eq(users.id, testUserId));
+    }
   });
 });

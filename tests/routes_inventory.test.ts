@@ -81,17 +81,17 @@ describe('Route Inventory & Input Validation Coverage', () => {
 
     // Verify every single route with an id param returns 400 when given 'not-a-uuid'
     for (const route of routesWithIdParams) {
-      let testUrl = route.fullPath;
+      let targetUrl = route.fullPath;
       for (const p of route.idParams) {
-        testUrl = testUrl.replace(`:${p}`, 'not-a-uuid');
+        targetUrl = targetUrl.replace(`:${p}`, 'not-a-uuid');
       }
-      testUrl = testUrl.replace(/:[a-zA-Z0-9_]+/g, 'dummy_token');
+      targetUrl = targetUrl.replace(/:[a-zA-Z0-9_]+/g, 'dummy_token');
 
       let reqCall: any;
-      if (route.method === 'GET') reqCall = request(app).get(testUrl);
-      else if (route.method === 'POST') reqCall = request(app).post(testUrl).send({});
-      else if (route.method === 'PATCH') reqCall = request(app).patch(testUrl).send({});
-      else if (route.method === 'DELETE') reqCall = request(app).delete(testUrl);
+      if (route.method === 'GET') reqCall = request(app).get(targetUrl);
+      else if (route.method === 'POST') reqCall = request(app).post(targetUrl).send({});
+      else if (route.method === 'PATCH') reqCall = request(app).patch(targetUrl).send({});
+      else if (route.method === 'DELETE') reqCall = request(app).delete(targetUrl);
       else continue;
 
       const res = await reqCall.set('Cookie', `session=${validToken}`);

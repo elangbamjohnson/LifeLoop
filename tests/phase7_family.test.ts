@@ -1,3 +1,4 @@
+// ordered scenario, tests share state
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { db } from '../src/db';
@@ -243,27 +244,29 @@ describe('Phase 7: Family Sharing, Role Permissions & Multi-User Security (P0/P1
     expect(sharedListRes.body.sharedItems.some((s: any) => s.itemId === aSharedItemId)).toBe(true);
   });
 
-  it('should strictly DENY USER_B access to USER_A private item (403 Forbidden)', async () => {
+  it('should strictly DENY USER_B access to USER_A private item (404 Not Found)', async () => {
     const res = await request(app)
       .get(`/api/v1/items/${aPrivateItemId}`)
       .set('Cookie', userBCookie);
 
-    expect(res.status).toBe(403);
-    expect(res.body.error).toContain('private to its owner');
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain('Item not found');
   });
 
   it('should strictly DENY USER_C (non-member) access to A_SHARED and A_PRIVATE', async () => {
-    // USER_C tries to fetch A_SHARED -> 403 Forbidden
+    // USER_C tries to fetch A_SHARED -> 404 Not Found (no visibility)
     const sharedFetch = await request(app)
       .get(`/api/v1/items/${aSharedItemId}`)
       .set('Cookie', userCCookie);
-    expect(sharedFetch.status).toBe(403);
+    expect(sharedFetch.status).toBe(404);
+    expect(sharedFetch.body.error).toContain('Item not found');
 
-    // USER_C tries to fetch A_PRIVATE -> 403 Forbidden
+    // USER_C tries to fetch A_PRIVATE -> 404 Not Found (no visibility)
     const privateFetch = await request(app)
       .get(`/api/v1/items/${aPrivateItemId}`)
       .set('Cookie', userCCookie);
-    expect(privateFetch.status).toBe(403);
+    expect(privateFetch.status).toBe(404);
+    expect(privateFetch.body.error).toContain('Item not found');
 
     // USER_C tries to access family shared resources -> 403 Forbidden
     const familyRes = await request(app)
@@ -281,13 +284,13 @@ describe('Phase 7: Family Sharing, Role Permissions & Multi-User Security (P0/P1
       .set('Cookie', userACookie);
     expect(unshareRes.status).toBe(200);
 
-    // USER_B immediately loses access to the item
+    // USER_B immediately loses access to the item -> 404 Not Found (no visibility)
     const fetchAfterUnshare = await request(app)
       .get(`/api/v1/items/${aSharedItemId}`)
       .set('Cookie', userBCookie);
 
-    expect(fetchAfterUnshare.status).toBe(403);
-    expect(fetchAfterUnshare.body.error).toContain('private to its owner');
+    expect(fetchAfterUnshare.status).toBe(404);
+    expect(fetchAfterUnshare.body.error).toContain('Item not found');
   });
 
   // 7. Revoked Member Access (Removal from Family)
@@ -318,12 +321,12 @@ describe('Phase 7: Family Sharing, Role Permissions & Multi-User Security (P0/P1
     expect(familyCheck.status).toBe(403);
     expect(familyCheck.body.error).toContain('not a member');
 
-    // USER_B immediately loses access to the shared item
+    // USER_B immediately loses access to the shared item -> 404 Not Found (no visibility)
     const itemCheck = await request(app)
       .get(`/api/v1/items/${aSharedItemId}`)
       .set('Cookie', userBCookie);
-    expect(itemCheck.status).toBe(403);
-    expect(itemCheck.body.error).toContain('private to its owner');
+    expect(itemCheck.status).toBe(404);
+    expect(itemCheck.body.error).toContain('Item not found');
   });
 
   // 8. IDOR Prevention & Non-Owner Family Deletion Blocking
@@ -334,5 +337,14 @@ describe('Phase 7: Family Sharing, Role Permissions & Multi-User Security (P0/P1
 
     expect(res.status).toBe(403);
     expect(res.body.error).toContain('Insufficient permissions');
+  });
+
+  it('should return 400 when attempting to unshare an item with a non-uuid identifier', async () => {
+    const res = await request(app)
+      .delete(`/api/v1/families/${familyId}/shared/not-a-uuid`)
+      .set('Cookie', userACookie);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Invalid identifier format');
   });
 });

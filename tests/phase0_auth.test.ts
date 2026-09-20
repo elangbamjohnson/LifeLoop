@@ -1,3 +1,4 @@
+// ordered scenario, tests share state
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { db } from '../src/db';
@@ -205,12 +206,12 @@ describe('Phase 0: Authentication, Session Management & Authorization (P0/P1)', 
     expect(ownerFetch.status).toBe(200);
     expect(ownerFetch.body.item.title).toBe('User A Private Financial Ledger');
 
-    // User B attempts to access User A's private item -> MUST BE 403 Forbidden
+    // User B attempts to access User A's private item -> MUST BE 404 Not Found (no visibility)
     const idorFetch = await request(app)
       .get(`/api/v1/items/${userAPrivateItemId}`)
       .set('Cookie', cookieB);
-    expect(idorFetch.status).toBe(403);
-    expect(idorFetch.body.error).toContain('private to its owner');
+    expect(idorFetch.status).toBe(404);
+    expect(idorFetch.body.error).toContain('Item not found');
 
     // User B attempts to update User A's private item -> MUST BE 404/403
     const idorPatch = await request(app)

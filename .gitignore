@@ -10,6 +10,9 @@ coverage/
 # Test artifacts
 test-results/
 playwright-report/
+.run_schemas_*.json
+.vitest/
+scratch/
 
 # Runtime uploads
 public/uploads/*

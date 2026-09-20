@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import request from 'supertest';
 import { db } from '../src/db';
 import { users, captures, items } from '../src/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { capturesRouter } from '../src/server/api/v1/captures';
+import { createAIProvider } from '../src/server/services/AIProvider';
 import { createTestApp } from './setup';
 import { v4 as uuidv4 } from 'uuid';
 import jwt from 'jsonwebtoken';
@@ -73,5 +74,65 @@ describe('Phase 2: AI Classification & Error Handling', () => {
     // An empty response should complete the capture but create NO items
     const createdItems = await db.select().from(items).where(eq(items.captureId, captureId));
     expect(createdItems.length).toBe(0);
+  });
+
+  describe('Boot and Startup Security Guards for AIProvider', () => {
+    const originalEnv = { ...process.env };
+
+    afterEach(() => {
+      process.env = { ...originalEnv };
+    });
+
+    it('should throw at startup when NODE_ENV=production and GEMINI_API_KEY is missing, naming the fix', () => {
+      process.env.NODE_ENV = 'production';
+      delete process.env.GEMINI_API_KEY;
+      delete process.env.AI_PROVIDER;
+
+      expect(() => createAIProvider()).toThrow(/FATAL: GEMINI_API_KEY environment variable is missing in production.*Fix:/i);
+    });
+
+    it('should refuse AI_PROVIDER=mock in production at boot, naming the fix', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.AI_PROVIDER = 'mock';
+      process.env.GEMINI_API_KEY = 'valid_dummy_key';
+
+      expect(() => createAIProvider()).toThrow(/FATAL: AI_PROVIDER cannot be set to 'mock' in production.*Fix:/i);
+    });
+
+    it('should refuse DISABLE_RATE_LIMIT=1 in production at boot, naming the fix', () => {
+      process.env.NODE_ENV = 'production';
+      delete process.env.AI_PROVIDER;
+      process.env.DISABLE_RATE_LIMIT = '1';
+      process.env.GEMINI_API_KEY = 'valid_dummy_key';
+
+      expect(() => createAIProvider()).toThrow(/FATAL: DISABLE_RATE_LIMIT cannot be set to '1' in production.*Fix:/i);
+    });
+
+    it('should never fall back to mock silently when GEMINI_API_KEY is missing in non-production, naming the fix', () => {
+      process.env.NODE_ENV = 'development';
+      delete process.env.GEMINI_API_KEY;
+      delete process.env.AI_PROVIDER;
+
+      expect(() => createAIProvider()).toThrow(/FATAL: GEMINI_API_KEY environment variable is missing and AI_PROVIDER is not set to 'mock'.*Fix:/i);
+    });
+
+    it('should never log the API key during initialization or logging', () => {
+      const secretKey = 'super_secret_raw_key_123456';
+      process.env.NODE_ENV = 'development';
+      process.env.GEMINI_API_KEY = secretKey;
+      delete process.env.AI_PROVIDER;
+
+      const logged: string[] = [];
+      const origLog = console.log;
+      console.log = (...args: any[]) => logged.push(args.join(' '));
+
+      try {
+        createAIProvider();
+        const fullLogs = logged.join('\n');
+        expect(fullLogs).not.toContain(secretKey);
+      } finally {
+        console.log = origLog;
+      }
+    });
   });
 });

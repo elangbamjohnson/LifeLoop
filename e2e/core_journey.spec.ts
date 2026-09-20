@@ -1,10 +1,15 @@
 import { test, expect } from '@playwright/test';
+import { verifyBackendReadiness } from './fixtures';
 
 test.describe('LifeLoop End-to-End User Journeys', () => {
   const timestamp = Date.now();
   const userAEmail = `e2e_user_a_${timestamp}@lifeloop.test`;
   const userBEmail = `e2e_user_b_${timestamp}@lifeloop.test`;
   const password = 'StrongPassword123!';
+
+  test.beforeEach(async ({ request, baseURL }) => {
+    await verifyBackendReadiness(request, baseURL || 'http://localhost:64532', { requireDb: true });
+  });
 
   test('1. Authentication Failure: Reject invalid password with clear feedback', async ({ page }) => {
     await page.goto('/auth');
@@ -20,7 +25,7 @@ test.describe('LifeLoop End-to-End User Journeys', () => {
     await expect(errorMsg).toContainText(/Invalid credentials|Authentication failed/);
   });
 
-  test('2. Core Journey: Register -> Capture -> AI Process -> Confirm -> Timeline -> Ask -> Family', async ({ page }) => {
+  test('2. Core Journey: Register -> Capture -> AI Process -> Confirm -> Timeline -> Ask -> Family', async ({ page }, testInfo) => {
     // 1. REGISTER USER_A
     await page.goto('/auth');
     await page.click('button:has-text("Need an account? Register")');
@@ -42,20 +47,22 @@ test.describe('LifeLoop End-to-End User Journeys', () => {
     await textarea.fill('Waiting on AutoZone for $120 refund on car battery');
     await page.click('button:has-text("Save to LifeLoop")');
 
-    // Wait for AI mock processing to complete and UI to refresh
-    await page.waitForTimeout(3000);
-
     // 3. HOME TAB & CONFIRM AI EXTRACTION
     await page.click('#tab-priority');
+    const autoZoneCard = page.locator('text=AutoZone').first();
+    await autoZoneCard.waitFor({ state: 'visible', timeout: 10000 });
     const confirmBtn = page.locator('button:has-text("Confirm")').first();
-    if (await confirmBtn.isVisible({ timeout: 5000 })) {
+    if (await confirmBtn.isVisible()) {
       await confirmBtn.click();
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(500);
     }
 
     // 4. TIMELINE TAB
     await page.click('#tab-timeline');
-    await expect(page.locator('text=AutoZone')).toBeVisible({ timeout: 5000 });
+    const ariaSelected = await page.locator('#tab-timeline').getAttribute('aria-selected');
+    console.log(`[Timeline Tab] #tab-timeline aria-selected right after click: "${ariaSelected}"`);
+    await page.screenshot({ path: `test-results/timeline-tab-clicked-${testInfo.project.name}.png` });
+    await expect(page.getByRole('heading', { level: 3, name: 'AutoZone' })).toBeVisible({ timeout: 5000 });
 
     // 5. ASK MY LIFE
     await page.click('#tab-ask');
@@ -66,7 +73,7 @@ test.describe('LifeLoop End-to-End User Journeys', () => {
     await page.click('button[type="submit"]');
 
     // Expect AI answer mentioning AutoZone
-    await expect(page.locator('text=AutoZone')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('text=AutoZone').first()).toBeVisible({ timeout: 10000 });
 
     // 6. FAMILY SHARING
     await page.click('#tab-family');
@@ -100,6 +107,7 @@ test.describe('LifeLoop End-to-End User Journeys', () => {
     // User B attempts Ask My Life for User A's data
     await page.click('#tab-ask');
     const askInput = page.locator('input[placeholder*="Ask about bills"]');
+    await expect(askInput).toBeVisible();
     await askInput.fill('What refund am I waiting for?');
     await page.click('button[type="submit"]');
 

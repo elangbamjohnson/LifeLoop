@@ -7,6 +7,8 @@ import { capturesRouter } from '../src/server/api/v1/captures';
 import { db } from '../src/db';
 import { users, captures } from '../src/db/schema';
 import { eq } from 'drizzle-orm';
+import { inArray } from 'drizzle-orm';
+import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 
 import { createTestApp } from './setup';
@@ -17,32 +19,38 @@ const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_development_on
 
 describe('Capture API - Phase 1', () => {
   let testUserId: string;
+  let otherUserId: string;
   let authCookie: string;
   let otherAuthCookie: string;
 
   beforeAll(async () => {
+    testUserId = uuidv4();
+    otherUserId = uuidv4();
+
     // Setup test users
-    const [user1] = await db.insert(users).values({
-      email: `test1_${Date.now()}@test.com`,
-      passwordHash: 'dummy'
-    }).returning();
-    testUserId = user1.id;
+    await db.insert(users).values([
+      {
+        id: testUserId,
+        email: `cap_user1_${testUserId}@test.com`,
+        passwordHash: 'dummy',
+      },
+      {
+        id: otherUserId,
+        email: `cap_user2_${otherUserId}@test.com`,
+        passwordHash: 'dummy',
+      },
+    ]);
 
-    const [user2] = await db.insert(users).values({
-      email: `test2_${Date.now()}@test.com`,
-      passwordHash: 'dummy'
-    }).returning();
-
-    const token1 = jwt.sign({ userId: user1.id }, JWT_SECRET);
+    const token1 = jwt.sign({ userId: testUserId }, JWT_SECRET);
     authCookie = `session=${token1}`;
 
-    const token2 = jwt.sign({ userId: user2.id }, JWT_SECRET);
+    const token2 = jwt.sign({ userId: otherUserId }, JWT_SECRET);
     otherAuthCookie = `session=${token2}`;
   });
 
   afterAll(async () => {
-    await db.delete(captures).where(eq(captures.userId, testUserId));
-    await db.delete(users).where(eq(users.id, testUserId));
+    await db.delete(captures).where(inArray(captures.userId, [testUserId, otherUserId]));
+    await db.delete(users).where(inArray(users.id, [testUserId, otherUserId]));
   });
 
   it('should reject unauthenticated requests', async () => {
@@ -83,6 +91,7 @@ describe('Capture API - Phase 1', () => {
       .set('Cookie', authCookie)
       .send({ type: 'text', rawPayload: 'User 1 Secret' });
     
+    expect(res1.status).toBe(201);
     const captureId = res1.body.capture.id;
 
     // User 2 tries to delete it
@@ -99,7 +108,8 @@ describe('Capture API - Phase 1', () => {
       .set('Cookie', authCookie)
       .send({ type: 'text', rawPayload: 'To be deleted' });
     
-    const captureId = res.body.capture?.id;
+    expect(res.status).toBe(201);
+    const captureId = res.body.capture.id;
 
     const delRes = await request(app)
       .delete(`/api/v1/captures/${captureId}`)
