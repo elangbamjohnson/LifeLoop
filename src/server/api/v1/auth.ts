@@ -16,7 +16,7 @@ if (!JWT_SECRET) {
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100,
-  skip: () => process.env.NODE_ENV === "test",
+  skip: () => process.env.DISABLE_RATE_LIMIT === "1",
   message: { error: "Too many login attempts, please try again later" },
   validate: { xForwardedForHeader: false, default: true }
 });

@@ -4,10 +4,12 @@ import { db } from "../../../db";
 import { captures } from "../../../db/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
+import { validateUuidParams, applyUuidParamValidation } from "../../middlewares/validation";
 import { storage } from "../../services/StorageProvider";
 import { aiProvider } from "../../services/AIProvider";
 
 export const capturesRouter = Router();
+applyUuidParamValidation(capturesRouter);
 
 // Configure multer for memory storage (we'll save it via StorageProvider)
 const upload = multer({
@@ -107,7 +109,7 @@ capturesRouter.get("/", requireAuth, async (req: AuthenticatedRequest, res, next
 });
 
 // Delete capture
-capturesRouter.delete("/:id", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+capturesRouter.delete("/:id", requireAuth, validateUuidParams("id"), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     

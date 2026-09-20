@@ -12,9 +12,25 @@ import { remindersRouter } from "./src/server/api/v1/reminders";
 import { askRouter } from "./src/server/api/v1/ask";
 import { relationsRouter } from "./src/server/api/v1/relations";
 import { familiesRouter } from "./src/server/api/v1/families";
+import { healthRouter } from "./src/server/api/health";
 import { errorHandler } from "./src/server/middlewares/errorHandler";
+import { db } from "./src/db";
+import { users } from "./src/db/schema";
 
 async function startServer() {
+  // Strict production safety guards at boot
+  if (process.env.NODE_ENV === "production") {
+    if (process.env.AI_PROVIDER === "mock") {
+      throw new Error("FATAL: AI_PROVIDER cannot be set to 'mock' in production environment. Fix: Unset or remove AI_PROVIDER from production environment variables.");
+    }
+    if (process.env.DISABLE_RATE_LIMIT === "1") {
+      throw new Error("FATAL: DISABLE_RATE_LIMIT cannot be set to '1' in production environment. Fix: Unset or remove DISABLE_RATE_LIMIT from production environment variables.");
+    }
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error("FATAL: GEMINI_API_KEY environment variable is missing in production. Fix: Set GEMINI_API_KEY in your production environment variables (e.g. export GEMINI_API_KEY=\"<your_gemini_api_key>\").");
+    }
+  }
+
   const app = express();
   
   // Trust the proxy to correctly resolve client IP for rate limiting behind Cloud Run / AI Studio infrastructure
@@ -43,9 +59,9 @@ async function startServer() {
   app.use("/api/v1/relations", relationsRouter);
   app.use("/api/v1/families", familiesRouter);
   
-  app.get("/api/v1/health", (req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
-  });
+  // Health & Readiness probes
+  app.use(healthRouter);
+
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
