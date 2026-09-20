@@ -102,3 +102,22 @@ HOST defaults to 0.0.0.0 in production so the load balancer can reach it.
   Dev             64532         24678      127.0.0.1
   E2E             64533         24679      127.0.0.1
   Production      $PORT/3000    N/A        0.0.0.0
+
+---
+
+## Admin Roles & Privileges
+
+Certain advanced capabilities (such as the Ask AI assistant and the Knowledge Graph explorer) are restricted to administrator users.
+
+- The `users` table contains an `is_admin` boolean column defaulting to `false`.
+- No API endpoint allows setting or updating the `is_admin` flag. Registration and profile updates strictly ignore any `isAdmin` fields in the payload.
+- To grant admin privileges to a user, execute the SQL script in `docs/grant-admin.sql` directly against the database:
+  1. Add the column (if not already applied):
+     ```sql
+     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin boolean NOT NULL DEFAULT false;
+     ```
+  2. Promote a target user by email:
+     ```sql
+     UPDATE users SET is_admin = true WHERE email = 'user@example.com';
+     ```
+

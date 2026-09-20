@@ -28,10 +28,12 @@ export async function setupTestSchema(targetSchema: string = process.env.TEST_SC
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         email VARCHAR(255) NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
+        is_admin BOOLEAN NOT NULL DEFAULT false,
         settings JSONB DEFAULT '{}'::jsonb,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
+      ALTER TABLE ${targetSchema}.users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
 
       CREATE TABLE IF NOT EXISTS ${targetSchema}.captures (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
