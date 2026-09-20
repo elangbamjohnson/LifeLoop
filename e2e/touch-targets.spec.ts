@@ -253,7 +253,7 @@ async function auditInputsFontSize(
 test.describe('Touch Targets Audit (Apple HIG 44pt & Material 3 48dp)', () => {
   test.beforeEach(async ({ page, request, baseURL }, testInfo) => {
     test.skip(!testInfo.project.use.hasTouch, 'Touch targets audit is restricted to touch-enabled projects');
-    await authenticateAndSeedSession(page, request, baseURL || 'http://localhost:64532');
+    await authenticateAndSeedSession(page, request, baseURL!);
   });
 
   const viewports = [

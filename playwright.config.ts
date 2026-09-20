@@ -4,8 +4,10 @@ delete process.env.DATABASE_URL;
 process.env.NODE_ENV = 'test';
 import { defineConfig, devices } from '@playwright/test';
 
-const PORT = process.env.PORT || '64532';
-const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${PORT}`;
+// E2E server uses a dedicated port that never conflicts with the dev server.
+const E2E_PORT = 64533;
+const E2E_HMR_PORT = 24679;
+const baseURL = `http://127.0.0.1:${E2E_PORT}`;
 
 export default defineConfig({
   testDir: './e2e',
@@ -25,25 +27,26 @@ export default defineConfig({
   projects: [
     {
       name: 'mobile-webkit',
-      use: { 
+      use: {
         ...devices['iPhone 15'],
       },
     },
     {
       name: 'mobile-chromium',
-      use: { 
+      use: {
         ...devices['Pixel 7'],
       },
     },
     {
       name: 'tablet',
-      use: { 
+      use: {
         ...devices['iPad Pro 11'],
       },
     },
   ],
   webServer: {
     command: 'npm run dev',
+    // Playwright polls this URL to know the server is ready.
     url: `${baseURL}/api/v1/health`,
     reuseExistingServer: false,
     timeout: 60000,
@@ -53,6 +56,9 @@ export default defineConfig({
       DISABLE_RATE_LIMIT: '1',
       TEST_SCHEMA: 'lifeloop_test_e2e',
       TEST_DATABASE_URL: process.env.TEST_DATABASE_URL!,
+      // Dedicated ports so the e2e server never collides with the dev server.
+      PORT: String(E2E_PORT),
+      VITE_HMR_PORT: String(E2E_HMR_PORT),
     },
     stdout: 'pipe',
     stderr: 'pipe',

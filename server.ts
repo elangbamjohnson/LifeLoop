@@ -82,10 +82,11 @@ async function startServer() {
   // Error Handler (must be last)
   app.use(errorHandler);
 
-  const server = app.listen(PORT, "0.0.0.0", () => {
+  const host = "127.0.0.1";
+  const server = app.listen(PORT, host, () => {
     const address = server.address();
     const actualPort = typeof address === "string" ? PORT : address?.port;
-    console.log(`Server running on http://localhost:${actualPort}`);
+    console.log(`Server running on http://${host}:${actualPort}`);
   });
 }
 

@@ -8,7 +8,7 @@ test.describe('LifeLoop End-to-End User Journeys', () => {
   const password = 'StrongPassword123!';
 
   test.beforeEach(async ({ request, baseURL }) => {
-    await verifyBackendReadiness(request, baseURL || 'http://localhost:64532', { requireDb: true });
+    await verifyBackendReadiness(request, baseURL!, { requireDb: true });
   });
 
   test('1. Authentication Failure: Reject invalid password with clear feedback', async ({ page }) => {
