@@ -4,8 +4,6 @@ import {
   Clock, 
   Calendar, 
   Bell, 
-  Edit3, 
-  Trash2, 
   AlertCircle,
   Hourglass, 
   Tag, 
@@ -18,10 +16,10 @@ import {
   Sparkles,
   Car,
   Users,
-  Paperclip,
-  ChevronDown
+  Paperclip
 } from "lucide-react";
 import { TimelineItem } from "../../../shared/utils/timeline";
+import { ItemCardActions } from "./ItemCardActions";
 
 interface ItemCardProps {
   key?: React.Key;
@@ -42,7 +40,6 @@ export const ItemCard: React.FC<ItemCardProps> = ({
   onConfirmAI,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [showSnoozeMenu, setShowSnoozeMenu] = useState(false);
   const isCompleted = item.status === "completed";
   const isPendingReview = item.status === "pending_review";
 
@@ -189,88 +186,29 @@ export const ItemCard: React.FC<ItemCardProps> = ({
             </div>
             
             {/* Quick Action Buttons (Always Visible, Never Auto-Hidden) + Chevron */}
-            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-               <button 
-                 id={`edit-item-${item.id}`} 
-                 onClick={(e) => {
-                   e.stopPropagation();
-                   onEdit(item);
-                 }} 
-                 className="p-1.5 text-[#78716C] hover:text-[#1C1917] dark:hover:text-white rounded-lg hover:bg-black/5 dark:hover:bg-white/5" 
-                 title="Edit"
-               >
-                 <Edit3 className="w-4 h-4" />
-               </button>
-               <button 
-                 id={`delete-item-${item.id}`} 
-                 onClick={(e) => {
-                   e.stopPropagation();
-                   onDelete(item.id);
-                 }} 
-                 className="p-1.5 text-[#78716C] hover:text-red-600 rounded-lg hover:bg-black/5 dark:hover:bg-white/5" 
-                 title="Delete"
-               >
-                 <Trash2 className="w-4 h-4" />
-               </button>
-               <div 
-                 onClick={(e) => {
-                   e.stopPropagation();
-                   setIsExpanded(!isExpanded);
-                 }}
-                 className="p-1.5 text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
-                 title={isExpanded ? "Collapse" : "Expand"}
-               >
-                 <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
-               </div>
-            </div>
+            <ItemCardActions
+              item={item}
+              variant="waiting_for_header"
+              isExpanded={isExpanded}
+              onToggleExpand={() => setIsExpanded(!isExpanded)}
+              onToggleComplete={onToggleComplete}
+              onSnooze={onSnooze}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onConfirmAI={onConfirmAI}
+            />
           </div>
           
           {/* Expanded Actions & Details */}
           {isExpanded && !isCompleted && (
-            <div className="flex flex-wrap items-center gap-2 mt-2 pt-2.5 border-t border-[#F5F5F4] dark:border-[#383330] animate-in fade-in duration-200" onClick={(e) => e.stopPropagation()}>
-              <button 
-                id={`toggle-complete-${item.id}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleComplete(item.id, true);
-                }} 
-                className="px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 rounded-lg text-xs font-medium hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors flex items-center gap-1.5"
-              >
-                 <Check className="w-3.5 h-3.5" /> Received
-              </button>
-              
-              <div className="relative">
-                <button 
-                  id={`snooze-btn-${item.id}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowSnoozeMenu(!showSnoozeMenu);
-                  }} 
-                  className="px-3 py-1.5 bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 border border-stone-200 dark:border-stone-700/60 rounded-lg text-xs font-medium hover:bg-stone-200 dark:hover:bg-stone-700 transition-colors flex items-center gap-1.5"
-                >
-                   <Clock className="w-3.5 h-3.5" /> Remind me later
-                </button>
-                {showSnoozeMenu && (
-                  <div id={`snooze-menu-${item.id}`} className="absolute left-0 top-full mt-1.5 w-36 bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] rounded-xl shadow-lg py-1 z-30 text-xs">
-                    <div className="px-3 py-1 text-[10px] font-semibold text-[#A8A29E] uppercase tracking-wider">Snooze for</div>
-                    <button onClick={(e) => { e.stopPropagation(); onSnooze(item.id, 1); setShowSnoozeMenu(false); }} className="w-full text-left px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/5 text-[#1C1917] dark:text-[#FDFBF7]">+1 Day (Tomorrow)</button>
-                    <button onClick={(e) => { e.stopPropagation(); onSnooze(item.id, 3); setShowSnoozeMenu(false); }} className="w-full text-left px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/5 text-[#1C1917] dark:text-[#FDFBF7]">+3 Days</button>
-                    <button onClick={(e) => { e.stopPropagation(); onSnooze(item.id, 7); setShowSnoozeMenu(false); }} className="w-full text-left px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/5 text-[#1C1917] dark:text-[#FDFBF7]">Next Week (+7d)</button>
-                  </div>
-                )}
-              </div>
-              
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  console.log("Analytics Event: FEATURE_USAGE", { feature: "WAITING_FOR_FOLLOW_UP", itemId: item.id });
-                  window.location.href = `mailto:?subject=Following up regarding ${item.title}&body=Hi ${person},%0D%0A%0D%0AJust following up on this.`;
-                }} 
-                className="px-3 py-1.5 bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] rounded-lg text-xs font-medium hover:opacity-90 transition-opacity ml-auto"
-              >
-                 Follow up
-              </button>
-            </div>
+            <ItemCardActions
+              item={item}
+              variant="waiting_for_expanded"
+              onToggleComplete={onToggleComplete}
+              onSnooze={onSnooze}
+              onEdit={onEdit}
+              onDelete={onDelete}
+            />
           )}
         </div>
       </div>
@@ -315,160 +253,30 @@ export const ItemCard: React.FC<ItemCardProps> = ({
         </div>
 
         {/* Right Side: Quick Action Buttons (Always Visible, Never Auto-Hidden) + Chevron */}
-        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-          {isPendingReview ? (
-            <div className="flex items-center gap-1.5">
-              <button
-                id={`confirm-review-${item.id}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onConfirmAI && onConfirmAI(item.id);
-                }}
-                className="text-xs font-medium bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg transition-colors"
-              >
-                Confirm
-              </button>
-              <button
-                id={`edit-review-${item.id}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onEdit(item);
-                }}
-                className="p-1.5 text-[#78716C] hover:text-[#1C1917] dark:hover:text-white rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
-                title="Edit item"
-              >
-                <Edit3 className="w-4 h-4" />
-              </button>
-              <button
-                id={`delete-review-${item.id}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(item.id);
-                }}
-                className="p-1.5 text-stone-400 hover:text-red-600 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
-                title="Reject and delete"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1">
-              {/* Snooze Dropdown */}
-              <div className="relative">
-                <button
-                  id={`snooze-btn-${item.id}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowSnoozeMenu(!showSnoozeMenu);
-                  }}
-                  className="p-1.5 text-[#78716C] hover:text-[#1C1917] dark:hover:text-white rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
-                  title="Snooze"
-                >
-                  <Clock className="w-4 h-4" />
-                </button>
-
-                {showSnoozeMenu && (
-                  <div
-                    id={`snooze-menu-${item.id}`}
-                    className="absolute right-0 top-full mt-1.5 w-36 bg-white dark:bg-[#292524] border border-[#E7E5E4] dark:border-[#44403C] rounded-xl shadow-lg py-1 z-30 text-xs"
-                  >
-                    <div className="px-3 py-1 text-[10px] font-semibold text-[#A8A29E] uppercase tracking-wider">
-                      Snooze for
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSnooze(item.id, 1);
-                        setShowSnoozeMenu(false);
-                      }}
-                      className="w-full text-left px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/5 text-[#1C1917] dark:text-[#FDFBF7]"
-                    >
-                      +1 Day (Tomorrow)
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSnooze(item.id, 3);
-                        setShowSnoozeMenu(false);
-                      }}
-                      className="w-full text-left px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/5 text-[#1C1917] dark:text-[#FDFBF7]"
-                    >
-                      +3 Days
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSnooze(item.id, 7);
-                        setShowSnoozeMenu(false);
-                      }}
-                      className="w-full text-left px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/5 text-[#1C1917] dark:text-[#FDFBF7]"
-                    >
-                      Next Week (+7d)
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Edit button */}
-              <button
-                id={`edit-item-${item.id}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onEdit(item);
-                }}
-                className="p-1.5 text-[#78716C] hover:text-[#1C1917] dark:hover:text-white rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
-                title="Edit item"
-              >
-                <Edit3 className="w-4 h-4" />
-              </button>
-
-              {/* Delete button */}
-              <button
-                id={`delete-item-${item.id}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(item.id);
-                }}
-                className="p-1.5 text-[#78716C] hover:text-red-600 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
-                title="Delete item"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-
-          {/* Expand / Collapse Indicator Chevron */}
-          <div
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsExpanded(!isExpanded);
-            }}
-            className="p-1.5 text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
-            title={isExpanded ? "Collapse" : "Expand"}
-          >
-            <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
-          </div>
-        </div>
+        <ItemCardActions
+          item={item}
+          variant="standard_header"
+          isExpanded={isExpanded}
+          onToggleExpand={() => setIsExpanded(!isExpanded)}
+          onToggleComplete={onToggleComplete}
+          onSnooze={onSnooze}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onConfirmAI={onConfirmAI}
+        />
       </div>
 
       {/* 2. Main Title & Due Date Row (Compact & Essential) */}
       <div className="flex items-start gap-3 mt-2.5">
         {!isPendingReview ? (
-          <button
-            id={`toggle-complete-${item.id}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleComplete(item.id, !isCompleted);
-            }}
-            className={`w-5 h-5 mt-0.5 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
-              isCompleted
-                ? "bg-emerald-600 border-emerald-600 text-white"
-                : "border-[#D6D3D1] dark:border-[#57534E] hover:border-[#1C1917] dark:hover:border-[#FDFBF7]"
-            }`}
-            title={isCompleted ? "Mark incomplete" : "Mark complete"}
-          >
-            {isCompleted && <Check className="w-3.5 h-3.5 stroke-[2.5]" />}
-          </button>
+          <ItemCardActions
+            item={item}
+            variant="complete_toggle"
+            onToggleComplete={onToggleComplete}
+            onSnooze={onSnooze}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
         ) : (
           <div className="mt-0.5 text-amber-500 shrink-0">
             <AlertCircle className="w-5 h-5" />

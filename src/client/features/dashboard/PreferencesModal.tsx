@@ -122,32 +122,35 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="preferences-modal-title"
-        className="relative w-full overflow-y-auto overscroll-contain no-scrollbar bg-white dark:bg-[#23201E] border border-[#E7E5E4] dark:border-[#383330] shadow-2xl max-w-md md:max-w-xl max-h-[90vh] rounded-t-3xl sm:rounded-3xl p-5 sm:p-7 z-10 animate-in slide-in-from-bottom-5 sm:zoom-in-95 duration-200"
+        className="relative w-full flex flex-col bg-white dark:bg-[#23201E] border border-[#E7E5E4] dark:border-[#383330] shadow-2xl max-w-md md:max-w-xl max-h-[90vh] rounded-t-3xl sm:rounded-3xl overflow-hidden z-10 animate-in slide-in-from-bottom-5 sm:zoom-in-95 duration-200"
       >
-        {/* Mobile handle indicator */}
-        <div className="sm:hidden w-10 h-1 bg-stone-300 dark:bg-stone-700 rounded-full mx-auto mb-3.5" />
-
         {/* Header Section */}
-        <div className="flex items-center justify-between pb-4 border-b border-[#F5F5F4] dark:border-[#332F2C] gap-3">
-          <h3
-            id="preferences-modal-title"
-            className="font-serif font-normal tracking-tight text-[#1C1917] dark:text-[#FDFBF7] flex items-center gap-2.5 text-lg sm:text-xl"
-          >
-            <Bell className="w-5 h-5 text-amber-500 shrink-0" />
-            Reminder Preferences
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="touch-target-48 min-w-[48px] min-h-[48px] -mr-2 p-2 text-[#78716C] hover:text-[#1C1917] dark:hover:text-white rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors shrink-0 flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
-            title="Close"
-            aria-label="Close preferences"
-          >
-            <X className="w-5 h-5" />
-          </button>
+        <div className="p-5 pb-4 sm:p-7 sm:pb-4 border-b border-[#F5F5F4] dark:border-[#332F2C] shrink-0">
+          {/* Mobile handle indicator */}
+          <div className="sm:hidden w-10 h-1 bg-stone-300 dark:bg-stone-700 rounded-full mx-auto mb-3.5" />
+          <div className="flex items-center justify-between gap-3">
+            <h3
+              id="preferences-modal-title"
+              className="font-serif font-normal tracking-tight text-[#1C1917] dark:text-[#FDFBF7] flex items-center gap-2.5 text-lg sm:text-xl"
+            >
+              <Bell className="w-5 h-5 text-amber-500 shrink-0" />
+              Reminder Preferences
+            </h3>
+            <button
+              type="button"
+              onClick={onClose}
+              className="touch-target-48 min-w-[48px] min-h-[48px] -mr-2 p-2 text-[#78716C] hover:text-[#1C1917] dark:hover:text-white rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors shrink-0 flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+              title="Close"
+              aria-label="Close preferences"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
-        <form onSubmit={handleSave} className="mt-5 space-y-6">
+        <form onSubmit={handleSave} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          {/* Scrollable Form Content */}
+          <div className="overflow-y-auto overscroll-contain flex-1 p-5 sm:p-7 space-y-6">
           {/* Section A: Master Toggle Card (Switch Row) */}
           <div
             id="auto-reminders-row"
@@ -253,7 +256,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
               type="text"
               value={timezone}
               onChange={(e) => setTimezone(e.target.value)}
-              className="w-full px-3.5 py-2.5 min-h-[48px] rounded-xl border border-[#E7E5E4] dark:border-[#44403C] bg-white dark:bg-[#1C1917] text-xs sm:text-sm text-[#1C1917] dark:text-[#FDFBF7] focus:outline-none focus:ring-1 focus:ring-amber-500"
+              className="w-full px-3.5 py-2.5 min-h-[48px] rounded-xl border border-[#E7E5E4] dark:border-[#44403C] bg-white dark:bg-[#1C1917] text-base text-[#1C1917] dark:text-[#FDFBF7] focus:outline-none focus:ring-1 focus:ring-amber-500"
             />
             <p className="text-[11px] text-[#78716C] mt-1 leading-normal">
               Ensures notifications arrive at the exact local hour across daylight-saving shifts.
@@ -312,7 +315,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
                     type="time"
                     value={quietHoursStart}
                     onChange={(e) => setQuietHoursStart(e.target.value)}
-                    className="w-full px-3 py-2.5 min-h-[48px] rounded-xl border border-[#E7E5E4] dark:border-[#44403C] bg-white dark:bg-[#1C1917] text-sm text-[#1C1917] dark:text-[#FDFBF7] focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    className="w-full px-3 py-2.5 min-h-[48px] rounded-xl border border-[#E7E5E4] dark:border-[#44403C] bg-white dark:bg-[#1C1917] text-base text-[#1C1917] dark:text-[#FDFBF7] focus:outline-none focus:ring-1 focus:ring-amber-500"
                   />
                 </div>
                 <div>
@@ -321,15 +324,17 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
                     type="time"
                     value={quietHoursEnd}
                     onChange={(e) => setQuietHoursEnd(e.target.value)}
-                    className="w-full px-3 py-2.5 min-h-[48px] rounded-xl border border-[#E7E5E4] dark:border-[#44403C] bg-white dark:bg-[#1C1917] text-sm text-[#1C1917] dark:text-[#FDFBF7] focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    className="w-full px-3 py-2.5 min-h-[48px] rounded-xl border border-[#E7E5E4] dark:border-[#44403C] bg-white dark:bg-[#1C1917] text-base text-[#1C1917] dark:text-[#FDFBF7] focus:outline-none focus:ring-1 focus:ring-amber-500"
                   />
                 </div>
               </div>
             )}
           </div>
 
+          </div>
+
           {/* Section 4: Footer Actions */}
-          <div className="sticky bottom-0 z-20 bg-white/95 dark:bg-[#23201E]/95 backdrop-blur-md border-t border-[#F5F5F4] dark:border-[#332F2C] flex items-center justify-end gap-3 pt-4 -mx-5 px-5 sm:-mx-7 sm:px-7 pb-2">
+          <div className="border-t border-[#F5F5F4] dark:border-[#332F2C] flex items-center justify-end gap-3 p-4 sm:px-7 shrink-0 bg-stone-50/80 dark:bg-stone-900/80 backdrop-blur-sm">
             <button
               type="button"
               id="preferences-cancel-btn"

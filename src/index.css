@@ -153,6 +153,7 @@ button, a {
 
   .main-viewport {
     margin-left: 0 !important;
+    padding-top: calc(56px + 16px) !important;
     padding-bottom: calc(144px + env(safe-area-inset-bottom, 0px)) !important;
   }
 
