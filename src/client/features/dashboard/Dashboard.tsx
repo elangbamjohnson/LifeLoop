@@ -593,14 +593,14 @@ export function Dashboard() {
           </button>
 
           </div>
-          {/* 5. More button (phone only, opens bottom sheet dialog) */}
+          {/* 5. More button (phone only, outside tablist — reached by Tab after the four tabs) */}
           <button
             type="button"
             id="tab-more"
-            role="button"
             ref={moreBtnRef}
             aria-haspopup="dialog"
             aria-expanded={isMoreOpen}
+            aria-controls="more-sheet-wrapper"
             aria-label="More navigation options"
             onClick={() => {
               if (isMoreOpen) closeMore();
