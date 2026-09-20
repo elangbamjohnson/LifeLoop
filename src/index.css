@@ -12,6 +12,13 @@
   --font-serif: "Playfair Display", ui-serif, Georgia, serif;
 }
 
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
 #root {
   overflow-x: clip;
 }
@@ -79,12 +86,16 @@ button, a {
     top: 0;
     left: 0;
     right: 0;
-    height: 56px;
+    height: auto;
+    min-height: auto;
     z-index: 30;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 16px;
+    padding-top: var(--safe-top);
+    padding-bottom: 8px;
+    padding-left: max(16px, var(--safe-left));
+    padding-right: max(16px, var(--safe-right));
     background-color: rgba(253, 251, 247, 0.95);
     border-bottom: 1px solid rgba(231, 229, 228, 0.8);
     backdrop-filter: blur(8px);
@@ -95,18 +106,32 @@ button, a {
     border-bottom-color: rgba(68, 64, 60, 0.8);
   }
 
+  .chrome-top-bar .brand-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .chrome-top-bar .actions-container {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
   .chrome-tablist {
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
-    height: calc(64px + env(safe-area-inset-bottom, 0px));
+    height: calc(64px + var(--safe-bottom));
     z-index: 40;
     display: flex;
     flex-direction: row;
     align-items: center;
     justify-content: space-around;
-    padding: 0 4px env(safe-area-inset-bottom, 0px) 4px;
+    padding: 0 max(4px, var(--safe-left)) var(--safe-bottom) max(4px, var(--safe-right));
     background-color: rgba(253, 251, 247, 0.95);
     border-top: 1px solid rgba(231, 229, 228, 0.8);
     backdrop-filter: blur(8px);
@@ -154,14 +179,16 @@ button, a {
 
   .main-viewport {
     margin-left: 0 !important;
-    padding-top: calc(56px + 16px) !important;
-    padding-bottom: calc(144px + env(safe-area-inset-bottom, 0px)) !important;
+    padding-top: 12px !important;
+    padding-bottom: calc(144px + var(--safe-bottom)) !important;
+    padding-left: max(16px, var(--safe-left)) !important;
+    padding-right: max(16px, var(--safe-right)) !important;
   }
 
   .fab-button-container {
     position: fixed;
-    bottom: calc(64px + 16px + env(safe-area-inset-bottom, 0px));
-    right: 16px;
+    bottom: calc(64px + 16px + var(--safe-bottom));
+    right: max(16px, var(--safe-right));
     z-index: 30;
   }
 }
@@ -183,7 +210,10 @@ button, a {
     justify-content: space-between;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 12px 6px;
+    padding-top: max(12px, var(--safe-top));
+    padding-bottom: max(12px, var(--safe-bottom));
+    padding-left: max(6px, var(--safe-left));
+    padding-right: max(6px, var(--safe-right));
     background-color: rgba(253, 251, 247, 0.98);
     border-right: 1px solid rgba(231, 229, 228, 0.8);
   }
@@ -291,13 +321,15 @@ button, a {
 
   .main-viewport {
     margin-left: 80px !important;
-    padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px)) !important;
+    padding-bottom: calc(32px + var(--safe-bottom)) !important;
+    padding-left: max(16px, var(--safe-left)) !important;
+    padding-right: max(16px, var(--safe-right)) !important;
   }
 
   .fab-button-container {
     position: fixed;
-    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-    right: 16px;
+    bottom: calc(16px + var(--safe-bottom));
+    right: max(16px, var(--safe-right));
     z-index: 30;
   }
 }
@@ -319,7 +351,10 @@ button, a {
     justify-content: space-between;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 20px 16px;
+    padding-top: max(20px, var(--safe-top));
+    padding-bottom: max(20px, var(--safe-bottom));
+    padding-left: max(16px, var(--safe-left));
+    padding-right: max(16px, var(--safe-right));
     background-color: rgba(253, 251, 247, 0.98);
     border-right: 1px solid rgba(231, 229, 228, 0.8);
   }
@@ -426,13 +461,15 @@ button, a {
 
   .main-viewport {
     margin-left: 256px !important;
-    padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px)) !important;
+    padding-bottom: calc(32px + var(--safe-bottom)) !important;
+    padding-left: max(24px, var(--safe-left)) !important;
+    padding-right: max(24px, var(--safe-right)) !important;
   }
 
   .fab-button-container {
     position: fixed;
-    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-    right: 24px;
+    bottom: calc(16px + var(--safe-bottom));
+    right: max(24px, var(--safe-right));
     z-index: 30;
   }
 }

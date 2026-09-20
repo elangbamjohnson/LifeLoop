@@ -13,6 +13,7 @@ playwright-report/
 .run_schemas_*.json
 .vitest/
 scratch/
+docs/screens/
 
 # Runtime uploads
 public/uploads/*
