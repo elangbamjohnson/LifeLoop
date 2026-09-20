@@ -88,7 +88,18 @@ export function Dashboard() {
   // Data
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const { captures, setCaptures, items, setItems, loading, refetch: fetchData } = useDashboardPolling(4000);
+  const [hasProcessing, setHasProcessing] = useState(false);
+
+  const { captures, setCaptures, items, setItems, loading, refetch: fetchData } =
+    useDashboardPolling(hasProcessing, logout);
+
+  // Keep hasProcessing in sync with capture statuses after each fetch
+  useEffect(() => {
+    const next = captures.some(
+      (c) => c.processingStatus === "pending" || c.processingStatus === "processing",
+    );
+    setHasProcessing(next);
+  }, [captures]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -491,7 +502,8 @@ export function Dashboard() {
         </div>
 
         {/* Tablist navigation (Priority, Timeline, Inbox, Ask, More; Graph & Family in More sheet on phone) */}
-        <nav role="tablist" aria-label="Main Destinations" className="chrome-tablist">
+        <nav aria-label="Main Destinations" className="chrome-tablist">
+          <div role="tablist" className="contents">
           {/* 1. Priority */}
           <button
             type="button"
@@ -580,16 +592,16 @@ export function Dashboard() {
             <span>Ask</span>
           </button>
 
+          </div>
           {/* 5. More button (phone only, opens bottom sheet dialog) */}
           <button
             type="button"
             id="tab-more"
-            role="tab"
+            role="button"
             ref={moreBtnRef}
             aria-haspopup="dialog"
             aria-expanded={isMoreOpen}
             aria-label="More navigation options"
-            aria-selected={isMoreActive}
             onClick={() => {
               if (isMoreOpen) closeMore();
               else openMore();
@@ -756,7 +768,7 @@ export function Dashboard() {
             className="focus:outline-none space-y-8"
           >
             {/* Family Sharing Banner (Conditional) */}
-            {!isFamilyBannerDismissed && (familyUnreadCount > 0 || items.some(i => i.isFamilyShared || (i.metadata as any)?.isFamilyShared)) && (
+            {!isFamilyBannerDismissed && (familyUnreadCount > 0 || items.some(i => (i.metadata as any)?.isFamilyShared)) && (
               <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/60 rounded-xl p-3.5 flex items-center justify-between text-xs gap-3">
                 <div className="flex items-center gap-2.5 text-amber-900 dark:text-amber-200 min-w-0">
                   <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-700 dark:text-amber-400 shrink-0">
