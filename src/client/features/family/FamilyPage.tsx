@@ -183,8 +183,11 @@ export function FamilyPage() {
           <div className="flex items-center gap-2 relative">
             {/* Notification bell */}
             <button
+              type="button"
               onClick={() => setShowNotifications(!showNotifications)}
               className="relative p-2 rounded-xl hover:bg-[#F5F5F4] dark:hover:bg-[#2C2927] transition-colors"
+              aria-label="Notifications"
+              title="Notifications"
             >
               <Bell size={18} className="text-[#44403C] dark:text-[#D6D3D1]" />
               {unreadCount > 0 && (

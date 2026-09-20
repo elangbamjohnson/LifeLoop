@@ -63,7 +63,13 @@ export function FamilyNotifications({ onClose, onNotificationAction }: Props) {
           <Bell size={16} className="text-[#78716C]" />
           <span className="font-semibold text-sm text-[#1C1917] dark:text-[#FDFBF7]">Family Notifications</span>
         </div>
-        <button onClick={onClose} className="p-1 rounded-lg hover:bg-[#F5F5F4] dark:hover:bg-[#3C3C3C] transition-colors">
+        <button
+          type="button"
+          onClick={onClose}
+          className="p-1 rounded-lg hover:bg-[#F5F5F4] dark:hover:bg-[#3C3C3C] transition-colors"
+          aria-label="Close notifications"
+          title="Close notifications"
+        >
           <X size={16} className="text-[#78716C]" />
         </button>
       </div>
