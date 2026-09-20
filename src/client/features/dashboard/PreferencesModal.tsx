@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { X, Bell, Globe, Moon, ShieldCheck, Check, Loader2 } from "lucide-react";
 
 interface PreferencesModalProps {
@@ -37,16 +37,26 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
       .catch(console.error);
   }, [isOpen]);
 
-  // Escape key handler
+  const previousActiveElement = useRef<HTMLElement | null>(null);
+
+  // Escape key handler & focus restoration
   useEffect(() => {
     if (!isOpen) return;
+
+    previousActiveElement.current = document.activeElement as HTMLElement;
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         onClose();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      setTimeout(() => {
+        previousActiveElement.current?.focus();
+      }, 50);
+    };
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
@@ -248,17 +258,18 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
 
           {/* Section C: Timezone & Locale */}
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-[#78716C] dark:text-[#A8A29E] mb-1.5 flex items-center gap-1.5">
+            <label htmlFor="preferences-timezone-input" className="block text-xs font-semibold uppercase tracking-wider text-[#78716C] dark:text-[#A8A29E] mb-1.5 flex items-center gap-1.5">
               <Globe className="w-3.5 h-3.5 text-amber-500" /> Timezone & Locale
             </label>
             <input
               id="preferences-timezone-input"
+              aria-label="Timezone & Locale"
               type="text"
               value={timezone}
               onChange={(e) => setTimezone(e.target.value)}
               className="w-full px-3.5 py-2.5 min-h-[48px] rounded-xl border border-[#E7E5E4] dark:border-[#44403C] bg-white dark:bg-[#1C1917] text-base text-[#1C1917] dark:text-[#FDFBF7] focus:outline-none focus:ring-1 focus:ring-amber-500"
             />
-            <p className="text-[11px] text-[#78716C] mt-1 leading-normal">
+            <p className="text-[11px] text-stone-600 dark:text-[#A8A29E] mt-1 leading-normal">
               Ensures notifications arrive at the exact local hour across daylight-saving shifts.
             </p>
           </div>
@@ -286,7 +297,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
                   <span className="text-xs font-semibold uppercase tracking-wider text-[#78716C] dark:text-[#A8A29E] block">
                     Quiet Hours
                   </span>
-                  <span className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">
+                  <span className="text-[11px] text-[#78716C] dark:text-[#A8A29E]">
                     Pause notifications during sleeping hours
                   </span>
                 </div>
@@ -310,7 +321,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
             {quietHoursEnabled && (
               <div className="grid grid-cols-2 gap-3 mt-3 animate-in fade-in duration-200">
                 <div>
-                  <label className="block text-[11px] text-[#78716C] mb-1 font-medium">Start Time</label>
+                  <label className="block text-[11px] text-stone-600 dark:text-[#A8A29E] mb-1 font-medium">Start Time</label>
                   <input
                     type="time"
                     value={quietHoursStart}
@@ -319,7 +330,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-[#78716C] mb-1 font-medium">End Time</label>
+                  <label className="block text-[11px] text-stone-600 dark:text-[#A8A29E] mb-1 font-medium">End Time</label>
                   <input
                     type="time"
                     value={quietHoursEnd}
@@ -339,7 +350,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
               type="button"
               id="preferences-cancel-btn"
               onClick={onClose}
-              className="touch-target-48 min-h-[48px] px-5 py-2.5 rounded-full text-xs sm:text-sm font-semibold text-[#78716C] dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-[#FDFBF7] bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400"
+              className="touch-target-48 min-h-[48px] px-5 py-2.5 rounded-full text-xs sm:text-sm font-semibold text-stone-600 dark:text-stone-300 hover:text-[#1C1917] dark:hover:text-[#FDFBF7] bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400"
             >
               Cancel
             </button>

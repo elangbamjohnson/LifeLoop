@@ -1,5 +1,6 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
 @custom-variant touch (@media (pointer: coarse));
 @custom-variant fine (@media (pointer: fine));
 @custom-variant medium (@media (min-width: 600px));
@@ -67,8 +68,8 @@ button, a {
    Mode 3: 840px and up (>=500px h) -> 256px sidebar, 100dvh
    ──────────────────────────────────────────────────────────────────────────── */
 
-/* Mode 1: Mobile Phone (<600px) */
-@media (max-width: 599px) {
+/* Mode 1: Mobile Phone (<600px, but excluding small landscape phones) */
+@media (max-width: 599px) and (min-height: 500px), (max-width: 599px) and (orientation: portrait) {
   .app-chrome {
     display: contents;
   }
@@ -166,7 +167,7 @@ button, a {
 }
 
 /* Mode 2: Rail (600px - 839px OR Landscape Phone <500px h) */
-@media (min-width: 600px) and (max-width: 839px), (orientation: landscape) and (min-width: 600px) and (max-width: 999px) and (max-height: 499px) {
+@media (min-width: 600px) and (max-width: 839px), (orientation: landscape) and (max-height: 499px) {
   .app-chrome {
     position: fixed;
     top: 0;
@@ -436,9 +437,29 @@ button, a {
   }
 }
 
-/* Landscape Phone Optimizations (<500px h, 600-999px w): hide non-essential rows */
-@media (orientation: landscape) and (min-width: 600px) and (max-width: 999px) and (max-height: 499px) {
+/* Landscape Phone Optimizations (<500px h): hide non-essential rows */
+@media (orientation: landscape) and (max-height: 499px) {
   .landscape-hide {
     display: none !important;
   }
 }
+
+/* Visible focus ring on every nav item */
+.chrome-tab-item:focus-visible,
+#tab-more:focus-visible {
+  outline: 2px solid #d97706 !important;
+  outline-offset: 2px !important;
+}
+
+/* Accessibility: prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+

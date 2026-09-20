@@ -24,10 +24,13 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
+  const previousActiveElement = useRef<HTMLElement | null>(null);
 
-  // Focus Cancel button first on open
+  // Focus Cancel button first on open & restore previous focus on close
   useEffect(() => {
     if (!isOpen) return;
+
+    previousActiveElement.current = document.activeElement as HTMLElement;
 
     const timer = setTimeout(() => {
       cancelBtnRef.current?.focus();
@@ -75,6 +78,9 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       clearTimeout(timer);
       window.removeEventListener("popstate", handlePopState);
       window.removeEventListener("keydown", handleKeyDown);
+      setTimeout(() => {
+        previousActiveElement.current?.focus();
+      }, 50);
     };
   }, [isOpen, onCancel]);
 
@@ -111,6 +117,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
   return (
     <div
+      id="confirm-dialog"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
       style={{
         paddingTop: "max(1rem, env(safe-area-inset-top, 0px))",
@@ -174,7 +181,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             id="confirm-dialog-cancel-btn"
             ref={cancelBtnRef}
             onClick={onCancel}
-            className="touch-target-48 min-h-[48px] min-w-[80px] px-5 py-2.5 rounded-full text-xs sm:text-sm font-semibold text-[#78716C] dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-[#FDFBF7] bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400"
+            className="touch-target-48 min-h-[48px] min-w-[80px] px-5 py-2.5 rounded-full text-xs sm:text-sm font-semibold text-stone-600 dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-[#FDFBF7] bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400"
           >
             {cancelLabel}
           </button>

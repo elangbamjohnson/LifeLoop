@@ -33,15 +33,7 @@ import { EntityDetailView } from "./EntityDetailView";
 import { groupItemsIntoTimeline, TimelineItem, TimelineGrouping } from "../../../shared/utils/timeline";
 import { FamilyPage } from "../family/FamilyPage";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
-
-interface Capture {
-  id: string;
-  type: string;
-  rawPayload: string;
-  originalFilename: string | null;
-  processingStatus: "pending" | "processing" | "completed" | "failed";
-  createdAt: string;
-}
+import { useDashboardPolling, Capture } from "../../hooks/useDashboardPolling";
 
 export function Dashboard() {
   const { user, logout } = useAuth();
@@ -75,6 +67,8 @@ export function Dashboard() {
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const moreSheetRef = useRef<HTMLDivElement>(null);
   const moreBtnRef = useRef<HTMLButtonElement>(null);
+  const captureBtnRef = useRef<HTMLButtonElement>(null);
+  const prefsBtnRef = useRef<HTMLButtonElement>(null);
 
   // Close profile menu when clicking outside
   useEffect(() => {
@@ -92,50 +86,14 @@ export function Dashboard() {
   }, [isProfileMenuOpen]);
 
   // Data
-  const [captures, setCaptures] = useState<Capture[]>([]);
-  const [items, setItems] = useState<TimelineItem[]>([]);
-  const [loading, setLoading] = useState(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const { captures, setCaptures, items, setItems, loading, refetch: fetchData } = useDashboardPolling(4000);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
-
-  const fetchData = async () => {
-    try {
-      const [capRes, itemRes] = await Promise.all([
-        fetch("/api/v1/captures"),
-        fetch("/api/v1/items"),
-      ]);
-
-      if (capRes.ok) {
-        const data = await capRes.json();
-        setCaptures(data.captures || []);
-      }
-      if (itemRes.ok) {
-        const data = await itemRes.json();
-        const rawItems = (data.items || []).map((i: any) => ({
-          ...i,
-          dueDate: i.dueDate ? new Date(i.dueDate).toISOString() : null,
-          snoozedUntil: i.snoozedUntil ? new Date(i.snoozedUntil).toISOString() : null,
-          completedAt: i.completedAt ? new Date(i.completedAt).toISOString() : null,
-          createdAt: new Date(i.createdAt).toISOString(),
-        }));
-        setItems(rawItems);
-      }
-    } catch (e) {
-      console.error("Failed to load dashboard data:", e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 4000);
-    return () => clearInterval(interval);
-  }, []);
 
   // Filter items by search query
   const filteredItems = searchQuery
@@ -454,6 +412,7 @@ export function Dashboard() {
           {/* Settings & Profile Actions */}
           <div className="actions-container">
             <button
+              ref={prefsBtnRef}
               id="reminder-preferences-btn"
               type="button"
               onClick={() => setIsPreferencesOpen(true)}
@@ -546,7 +505,7 @@ export function Dashboard() {
             className={`chrome-tab-item touch-target-48 ${
               activeTab === "priority"
                 ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
-                : "text-[#78716C] dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white"
+                : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
             }`}
           >
             <Sparkles className="w-5 h-5 text-amber-500 shrink-0" />
@@ -566,7 +525,7 @@ export function Dashboard() {
             className={`chrome-tab-item touch-target-48 ${
               activeTab === "timeline"
                 ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
-                : "text-[#78716C] dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white"
+                : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
             }`}
           >
             <Clock className="w-5 h-5 text-blue-500 shrink-0" />
@@ -586,7 +545,7 @@ export function Dashboard() {
             className={`chrome-tab-item touch-target-48 relative ${
               activeTab === "captures"
                 ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
-                : "text-[#78716C] dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white"
+                : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
             }`}
           >
             <Inbox className="w-5 h-5 text-emerald-500 shrink-0" />
@@ -614,7 +573,7 @@ export function Dashboard() {
             className={`chrome-tab-item touch-target-48 ${
               activeTab === "ask"
                 ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
-                : "text-[#78716C] dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white"
+                : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
             }`}
           >
             <Bot className="w-5 h-5 text-indigo-500 shrink-0" />
@@ -625,6 +584,7 @@ export function Dashboard() {
           <button
             type="button"
             id="tab-more"
+            role="tab"
             ref={moreBtnRef}
             aria-haspopup="dialog"
             aria-expanded={isMoreOpen}
@@ -637,15 +597,16 @@ export function Dashboard() {
             className={`chrome-tab-item touch-target-48 ${
               isMoreActive
                 ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
-                : "text-[#78716C] dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white"
+                : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
             }`}
           >
             <MoreHorizontal className={`w-5 h-5 shrink-0 ${isMoreActive ? "text-amber-500" : ""}`} />
             <span>More</span>
           </button>
+        </nav>
 
-          {/* Graph & Family Container (More sheet on phone, inline in rail/sidebar) */}
-          <div
+        {/* Graph & Family Container (More sheet on phone, inline in rail/sidebar) */}
+        <div
             id="more-sheet-wrapper"
             className={isMoreOpen ? "sheet-open" : ""}
             role={isMoreOpen ? "dialog" : undefined}
@@ -663,6 +624,7 @@ export function Dashboard() {
             {/* Bottom sheet content */}
             <div
               id="more-sheet-content"
+              className="bg-white dark:bg-[#1C1917] rounded-t-3xl p-4 relative z-10"
               ref={moreSheetRef}
               onTouchStart={handleTouchStart}
               onTouchMove={handleTouchMove}
@@ -687,8 +649,9 @@ export function Dashboard() {
               </div>
 
               {/* 5. Graph Tab */}
-              <button
-                type="button"
+              <div role="tablist" aria-label="More Views Tabs" className="flex flex-col">
+                <button
+                  type="button"
                 id="tab-graph"
                 role="tab"
                 aria-selected={activeTab === "graph"}
@@ -703,7 +666,7 @@ export function Dashboard() {
                 className={`chrome-tab-item touch-target-48 ${
                   activeTab === "graph"
                     ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
-                    : "text-[#78716C] dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white"
+                    : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
                 }`}
               >
                 <Network className="w-5 h-5 text-purple-500 shrink-0" />
@@ -727,7 +690,7 @@ export function Dashboard() {
                 className={`chrome-tab-item touch-target-48 relative ${
                   activeTab === "family"
                     ? "bg-white dark:bg-[#292524] text-[#1C1917] dark:text-[#FDFBF7] shadow-xs font-semibold"
-                    : "text-[#78716C] dark:text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-white"
+                    : "text-[#57534E] dark:text-[#D6D3D1] hover:text-[#1C1917] dark:hover:text-white"
                 }`}
               >
                 <Users className="w-5 h-5 text-emerald-500 shrink-0" />
@@ -740,7 +703,7 @@ export function Dashboard() {
               </button>
             </div>
           </div>
-        </nav>
+        </div>
       </header>
 
       {/* ────────────────────────────────────────────────────────────────────
@@ -1331,6 +1294,7 @@ export function Dashboard() {
           ──────────────────────────────────────────────────────────────────── */}
       <div className={`fab-button-container ${activeTab === "ask" ? "hidden" : ""}`}>
         <button
+          ref={captureBtnRef}
           id="global-capture-btn"
           type="button"
           onClick={() => setIsCaptureOpen(true)}
@@ -1348,13 +1312,23 @@ export function Dashboard() {
           ──────────────────────────────────────────────────────────────────── */}
       <CaptureDialog
         isOpen={isCaptureOpen}
-        onClose={() => setIsCaptureOpen(false)}
+        onClose={() => {
+          setIsCaptureOpen(false);
+          setTimeout(() => {
+            captureBtnRef.current?.focus();
+          }, 50);
+        }}
         onSubmit={handleCaptureSubmit}
       />
 
       <PreferencesModal
         isOpen={isPreferencesOpen}
-        onClose={() => setIsPreferencesOpen(false)}
+        onClose={() => {
+          setIsPreferencesOpen(false);
+          setTimeout(() => {
+            prefsBtnRef.current?.focus();
+          }, 50);
+        }}
       />
 
       <InstallModal

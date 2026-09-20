@@ -247,7 +247,7 @@ export const ItemCard: React.FC<ItemCardProps> = ({
           ) : null}
 
           {/* Timestamp / Date */}
-          <span className="text-[11px] text-[#A8A29E] dark:text-[#78716C] ml-1">
+          <span className="text-[11px] text-[#57534E] dark:text-[#D6D3D1] ml-1">
             {new Date(item.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
           </span>
         </div>
@@ -358,7 +358,7 @@ export const ItemCard: React.FC<ItemCardProps> = ({
             <div className="pt-2 border-t border-[#F5F5F4] dark:border-[#383330] grid grid-cols-2 gap-2">
               {amount !== undefined && amount !== null && (
                 <div>
-                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#A8A29E]">Amount Due</span>
+                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#57534E] dark:text-[#A8A29E]">Amount Due</span>
                   <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
                     {currencySymbol}{Number(amount).toLocaleString()}
                   </p>
@@ -366,7 +366,7 @@ export const ItemCard: React.FC<ItemCardProps> = ({
               )}
               {item.dueDate && (
                 <div>
-                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#A8A29E]">Deadline</span>
+                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#57534E] dark:text-[#A8A29E]">Deadline</span>
                   <p className={`text-xs font-medium ${item.badgeVariant === "urgent" ? "text-rose-600 dark:text-rose-400" : "text-[#292524] dark:text-[#E7E5E4]"}`}>
                     {new Date(item.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
                   </p>
@@ -374,25 +374,25 @@ export const ItemCard: React.FC<ItemCardProps> = ({
               )}
               {policyNumber && (
                 <div>
-                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#A8A29E]">Policy #</span>
+                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#57534E] dark:text-[#A8A29E]">Policy #</span>
                   <p className="text-xs font-medium text-[#292524] dark:text-[#E7E5E4] truncate">{policyNumber}</p>
                 </div>
               )}
               {vin && (
                 <div>
-                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#A8A29E]">VIN / Asset #</span>
+                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#57534E] dark:text-[#A8A29E]">VIN / Asset #</span>
                   <p className="text-xs font-medium text-[#292524] dark:text-[#E7E5E4] truncate">{vin}</p>
                 </div>
               )}
               {location && (
                 <div>
-                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#A8A29E]">Location</span>
+                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#57534E] dark:text-[#A8A29E]">Location</span>
                   <p className="text-xs font-medium text-[#292524] dark:text-[#E7E5E4] truncate">{location}</p>
                 </div>
               )}
               {item.snoozedUntil && (
                 <div>
-                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#A8A29E]">Snoozed Until</span>
+                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#57534E] dark:text-[#A8A29E]">Snoozed Until</span>
                   <p className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E] flex items-center gap-1">
                     <Clock className="w-3 h-3" />
                     {new Date(item.snoozedUntil).toLocaleDateString()}
@@ -406,12 +406,12 @@ export const ItemCard: React.FC<ItemCardProps> = ({
           <div className="pt-2 border-t border-[#F5F5F4] dark:border-[#383330] flex items-center justify-between gap-2 text-xs flex-wrap">
             <div className="flex flex-wrap gap-1.5 items-center">
               {tags.map((tag: string, idx: number) => (
-                <span key={idx} className="px-2 py-0.5 rounded-md bg-[#F5F5F4] dark:bg-[#1C1917] text-[#78716C] dark:text-[#A8A29E] text-[11px] font-normal">
+                <span key={idx} className="px-2 py-0.5 rounded-md bg-[#F5F5F4] dark:bg-[#1C1917] text-stone-600 dark:text-stone-400 text-[11px] font-normal">
                   #{tag.replace(/^#/, '')}
                 </span>
               ))}
               {tags.length === 0 && (
-                <span className="px-2 py-0.5 rounded-md bg-[#F5F5F4] dark:bg-[#1C1917] text-[#78716C] dark:text-[#A8A29E] text-[11px] font-normal">
+                <span className="px-2 py-0.5 rounded-md bg-[#F5F5F4] dark:bg-[#1C1917] text-stone-600 dark:text-stone-400 text-[11px] font-normal">
                   #{item.itemType}
                 </span>
               )}
