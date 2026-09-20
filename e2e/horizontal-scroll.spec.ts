@@ -317,4 +317,41 @@ test.describe('Horizontal Scrolling & Overflow Audit', () => {
       await expect(prefsBtn).toBeVisible();
     }
   });
+
+  test('Landscape Phone (852x393): 80px slim rail, main scroll >= 70% viewport height, no horizontal overflow, all six items reachable', async ({ page }) => {
+    await page.setViewportSize({ width: 852, height: 393 });
+    await page.goto('/');
+    await page.waitForSelector('main', { state: 'visible' });
+
+    // 1. 80px rail
+    const railHeader = page.locator('header.w-\\[80px\\]');
+    await expect(railHeader).toBeVisible();
+    const railBox = await railHeader.boundingBox();
+    expect(railBox).not.toBeNull();
+    expect(railBox!.width).toBeCloseTo(80, 1);
+
+    // 2. Date subtitle hidden in landscape
+    const dateSubtitle = page.locator('.landscape-hide');
+    await expect(dateSubtitle).toBeHidden();
+
+    // 3. LifeLoop brand title is visible
+    await expect(railHeader.locator('h1:has-text("LifeLoop")')).toBeVisible();
+
+    // 4. Main scroll area >= 70% of viewport height (393 * 0.7 = 275.1px)
+    const mainBox = await page.locator('main').boundingBox();
+    expect(mainBox).not.toBeNull();
+    expect(mainBox!.height).toBeGreaterThanOrEqual(393 * 0.7);
+
+    // 5. No horizontal overflow
+    const overflowReport = await auditHorizontalOverflow(page, 'Landscape Phone', 'iPhone 15 Pro Max', 852);
+    expect(overflowReport.passed).toBe(true);
+
+    // 6. All six items reachable
+    const tabIds = ['priority', 'timeline', 'captures', 'ask', 'graph', 'family'];
+    for (const id of tabIds) {
+      const tab = page.locator(`#tab-${id}`);
+      await tab.scrollIntoViewIfNeeded();
+      await expect(tab).toBeVisible();
+    }
+  });
 });

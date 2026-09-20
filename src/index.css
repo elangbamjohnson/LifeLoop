@@ -276,6 +276,16 @@ button, a {
   :is(.dark .actions-container) {
     border-top-color: rgba(68, 64, 60, 0.6);
   }
+  .actions-container #user-profile-menu-btn {
+    width: 48px !important;
+    max-width: 48px !important;
+    padding: 0 !important;
+    border-radius: 9999px !important;
+  }
+  .actions-container #user-profile-menu-btn span,
+  .actions-container #user-profile-menu-btn svg {
+    display: none !important;
+  }
 
   .main-viewport {
     margin-left: 80px !important;
@@ -398,6 +408,18 @@ button, a {
   }
   :is(.dark .actions-container) {
     border-top-color: rgba(68, 64, 60, 0.6);
+  }
+  .actions-container #user-profile-menu-btn {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 8px 12px !important;
+    border-radius: 9999px !important;
+  }
+  .actions-container #user-profile-menu-btn span {
+    display: inline !important;
+  }
+  .actions-container #user-profile-menu-btn svg {
+    display: inline-block !important;
   }
 
   .main-viewport {
