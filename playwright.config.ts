@@ -62,6 +62,7 @@ export default defineConfig({
       DISABLE_RATE_LIMIT: '1',
       TEST_SCHEMA: 'lifeloop_test_e2e',
       TEST_DATABASE_URL: process.env.TEST_DATABASE_URL!,
+      HOST: '127.0.0.1',
       // Dedicated ports so the e2e server never collides with the dev server.
       PORT: String(E2E_PORT),
       VITE_HMR_PORT: String(E2E_HMR_PORT),

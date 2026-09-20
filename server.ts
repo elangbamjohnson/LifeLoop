@@ -82,10 +82,11 @@ async function startServer() {
   // Error Handler (must be last)
   app.use(errorHandler);
 
-  // HOST defaults to 127.0.0.1 (loopback) for dev/test.
-  // In production the platform (Cloud Run, Render, etc.) must set HOST=0.0.0.0 or leave it
-  // unset — the production default below ensures the server is reachable by the load balancer.
-  // Never set HOST=0.0.0.0 locally unless you are deliberately exposing to a trusted network.
+  // HOST resolution: HOST env var wins (lets the caller inject any interface).
+  // Outside production, default to 127.0.0.1 (numeric loopback) — never "localhost",
+  // which on Node >= 17 / macOS resolves to ::1 (IPv6) and breaks curl/Playwright
+  // health-check probes that connect via IPv4.
+  // In production, default to 0.0.0.0 so the load-balancer can reach the container.
   const host = process.env.HOST ?? (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
   const server = app.listen(PORT, host, () => {
     const address = server.address();
