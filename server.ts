@@ -9,6 +9,11 @@ import { createApp } from "./src/server/app";
 import { errorHandler } from "./src/server/middlewares/errorHandler";
 import { db } from "./src/db";
 import { users } from "./src/db/schema";
+import { getConnectionString, logDbStartup } from "./src/db/config";
+
+// Log once: env=<NODE_ENV> db=<host>:<port>/<dbname> (no credentials).
+// getConnectionString() has already enforced the dev-DB guard inside src/db/index.ts.
+logDbStartup(getConnectionString());
 
 async function startServer() {
   // Strict production safety guards at boot

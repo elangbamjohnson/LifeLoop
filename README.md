@@ -45,6 +45,55 @@ Both server.ts (Express) and vite.config.ts (Vite dev server + HMR socket) read 
   const host = process.env.HOST ?? (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
   server: { host, hmr: { host, port: hmrPort } }
 
+## Environments
+
+### Development (local)
+
+The local dev server connects to a **local PostgreSQL instance only**. It will
+refuse to start if `DATABASE_URL` points to any non-loopback host that is not
+explicitly listed in `DEV_DB_ALLOWED_HOSTS`. `PROD_DB_HOST` adds a second line
+of defence: even an allowlisted host is rejected if it matches the production
+host.
+
+#### 1. Create the local dev database
+
+```bash
+# Adjust -h / -p / -U if your local Postgres differs.
+createdb -h 127.0.0.1 -p 5433 -U postgres lifeloop_dev_db
+```
+
+#### 2. Configure `.env`
+
+Copy `.env.example` to `.env` and set:
+
+```env
+DATABASE_URL=postgres://postgres@127.0.0.1:5433/lifeloop_dev_db
+PROD_DB_HOST=<your-production-db-host-only>   # no credentials
+DEV_DB_ALLOWED_HOSTS=                         # leave blank for loopback-only
+```
+
+#### 3. Apply schema
+
+```bash
+npm run db:migrate:dev
+```
+
+#### 4. Register a dev account
+
+Start the server (`npm run dev`), open http://localhost:64532, and register
+through the UI. No seed script is needed.
+
+#### 5. Grant admin privileges (local only)
+
+Run this SQL directly against your **local** `lifeloop_dev_db`:
+
+```sql
+UPDATE public.users SET is_admin = true WHERE email = 'you@example.com';
+```
+
+Production variables are configured in the **Render dashboard** only.
+Never point your local `.env` at the production database.
+
 ---
 
 ## Development
@@ -52,8 +101,10 @@ Both server.ts (Express) and vite.config.ts (Vite dev server + HMR socket) read 
   npm install
   npm run dev          # starts on http://127.0.0.1:64532 by default
   npm run check        # runs TypeScript typechecking
+  npm run db:migrate:dev  # applies schema to local dev database
 
 ---
+
 
 ## Testing
 
