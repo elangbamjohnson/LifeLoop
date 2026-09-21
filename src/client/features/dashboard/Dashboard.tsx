@@ -35,6 +35,8 @@ import { groupItemsIntoTimeline, TimelineItem, TimelineGrouping } from "../../..
 import { FamilyPage } from "../family/FamilyPage";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { useDashboardPolling, Capture } from "../../hooks/useDashboardPolling";
+import { useLiveSync } from "../../hooks/useLiveSync";
+import { getTabClientId } from "../../utils/tabId";
 
 export function Dashboard() {
   const { user, loading: authLoading, logout } = useAuth();
@@ -203,6 +205,47 @@ export function Dashboard() {
   const { captures, setCaptures, items, setItems, loading, refetch: fetchData } =
     useDashboardPolling(hasProcessing, logout);
 
+  const tabId = useRef(getTabClientId()).current;
+  const lastFetchTimeRef = useRef(0);
+  const trailingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const deduplicatedRefetch = useCallback(() => {
+    const now = Date.now();
+    const elapsed = now - lastFetchTimeRef.current;
+
+    if (elapsed >= 1000) {
+      if (trailingTimerRef.current !== null) {
+        clearTimeout(trailingTimerRef.current);
+        trailingTimerRef.current = null;
+      }
+      lastFetchTimeRef.current = now;
+      fetchData();
+    } else if (trailingTimerRef.current === null) {
+      const remaining = 1000 - elapsed;
+      trailingTimerRef.current = setTimeout(() => {
+        trailingTimerRef.current = null;
+        lastFetchTimeRef.current = Date.now();
+        fetchData();
+      }, remaining);
+    }
+  }, [fetchData]);
+
+  useEffect(() => {
+    return () => {
+      if (trailingTimerRef.current !== null) {
+        clearTimeout(trailingTimerRef.current);
+        trailingTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useLiveSync({
+    enabled: Boolean(user),
+    tabId,
+    onSync: deduplicatedRefetch,
+    onAuthError: logout,
+  });
+
   // Keep hasProcessing in sync with capture statuses after each fetch
   useEffect(() => {
     const next = captures.some(
@@ -241,7 +284,11 @@ export function Dashboard() {
       formData.append("file", data.payload);
     }
 
-    const res = await fetch("/api/v1/captures", { method: "POST", body: formData });
+    const res = await fetch("/api/v1/captures", {
+      method: "POST",
+      headers: { "X-Client-Id": tabId },
+      body: formData,
+    });
     if (res.ok) {
       showToast("Captured! LifeLoop AI is organizing it in the background.");
       fetchData();
@@ -257,7 +304,7 @@ export function Dashboard() {
     try {
       await fetch(`/api/v1/items/${id}/complete`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Client-Id": tabId },
         body: JSON.stringify({ completed }),
       });
       showToast(completed ? "Marked complete" : "Reopened item");
@@ -273,7 +320,7 @@ export function Dashboard() {
     try {
       await fetch(`/api/v1/items/${id}/snooze`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Client-Id": tabId },
         body: JSON.stringify({ snoozeDays: days }),
       });
       showToast(`Snoozed for ${days} day${days > 1 ? "s" : ""}`);
@@ -291,7 +338,7 @@ export function Dashboard() {
     try {
       await fetch(`/api/v1/items/${id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Client-Id": tabId },
         body: JSON.stringify({ status: "active" }),
       });
       showToast("Confirmed into LifeLoop!");
@@ -313,7 +360,10 @@ export function Dashboard() {
       onConfirm: async () => {
         setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
         try {
-          await fetch(`/api/v1/items/${id}`, { method: "DELETE" });
+          await fetch(`/api/v1/items/${id}`, {
+            method: "DELETE",
+            headers: { "X-Client-Id": tabId },
+          });
           setItems((prev) => prev.filter((i) => i.id !== id));
           showToast("Item deleted");
         } catch (err) {
@@ -329,7 +379,7 @@ export function Dashboard() {
     try {
       const res = await fetch(`/api/v1/items/${editingItem.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Client-Id": tabId },
         body: JSON.stringify(updated),
       });
       if (res.ok) {
@@ -352,7 +402,10 @@ export function Dashboard() {
       onConfirm: async () => {
         setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
         try {
-          const res = await fetch(`/api/v1/captures/${id}`, { method: "DELETE" });
+          const res = await fetch(`/api/v1/captures/${id}`, {
+            method: "DELETE",
+            headers: { "X-Client-Id": tabId },
+          });
           if (res.ok) {
             setCaptures((prev) => prev.filter((c) => c.id !== id));
             showToast("Capture deleted");

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { X, Bell, Globe, Moon, ShieldCheck, Check, Loader2 } from "lucide-react";
+import { getTabClientId } from "../../utils/tabId";
 
 interface PreferencesModalProps {
   isOpen: boolean;
@@ -85,7 +86,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
     try {
       const res = await fetch("/api/v1/reminders/preferences", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Client-Id": getTabClientId() },
         body: JSON.stringify({
           autoReminders,
           channels,
