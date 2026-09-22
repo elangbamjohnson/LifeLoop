@@ -1,13 +1,17 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Mic, Camera, FileUp, Type, X, Send } from "lucide-react";
+import { useAuth } from "../../hooks/useAuth";
 
 interface CaptureDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (data: { type: string; payload: string | File }) => Promise<void>;
+  isAdmin?: boolean;
 }
 
-export function CaptureDialog({ isOpen, onClose, onSubmit }: CaptureDialogProps) {
+export function CaptureDialog({ isOpen, onClose, onSubmit, isAdmin: propIsAdmin }: CaptureDialogProps) {
+  const { user } = useAuth();
+  const isAdmin = propIsAdmin ?? Boolean(user?.isAdmin);
   const [activeTab, setActiveTab] = useState<"text" | "media">("text");
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -16,6 +20,12 @@ export function CaptureDialog({ isOpen, onClose, onSubmit }: CaptureDialogProps)
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const previousActiveElement = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!isAdmin && activeTab === "media") {
+      setActiveTab("text");
+    }
+  }, [isAdmin, activeTab]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -51,7 +61,7 @@ export function CaptureDialog({ isOpen, onClose, onSubmit }: CaptureDialogProps)
     try {
       if (activeTab === "text" && text) {
         await onSubmit({ type: "text", payload: text });
-      } else if (activeTab === "media" && file) {
+      } else if (isAdmin && activeTab === "media" && file) {
         // Simple type inference
         let type = "document";
         if (file.type.startsWith("image/")) type = "image";
@@ -88,6 +98,7 @@ export function CaptureDialog({ isOpen, onClose, onSubmit }: CaptureDialogProps)
         <div className="flex items-center justify-between p-4 border-b border-[#E7E5E4] dark:border-[#292524]">
           <div className="flex gap-2 p-1 bg-[#E7E5E4]/50 dark:bg-[#292524] rounded-xl">
             <button
+              id="capture-tab-text"
               type="button"
               onClick={() => setActiveTab("text")}
               className={`touch-target-48 min-h-[48px] px-4 py-2 text-sm font-medium rounded-xl transition-all flex items-center ${
@@ -99,18 +110,21 @@ export function CaptureDialog({ isOpen, onClose, onSubmit }: CaptureDialogProps)
               <Type className="w-4 h-4 inline-block mr-2" />
               Text
             </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("media")}
-              className={`touch-target-48 min-h-[48px] px-4 py-2 text-sm font-medium rounded-xl transition-all flex items-center ${
-                activeTab === "media" 
-                  ? "bg-white dark:bg-[#44403C] text-black dark:text-white shadow-xs" 
-                  : "text-[#57534E] dark:text-[#D6D3D1] hover:text-black dark:hover:text-white"
-              }`}
-            >
-              <Camera className="w-4 h-4 inline-block mr-2" />
-              Media
-            </button>
+            {isAdmin && (
+              <button
+                id="capture-tab-media"
+                type="button"
+                onClick={() => setActiveTab("media")}
+                className={`touch-target-48 min-h-[48px] px-4 py-2 text-sm font-medium rounded-xl transition-all flex items-center ${
+                  activeTab === "media" 
+                    ? "bg-white dark:bg-[#44403C] text-black dark:text-white shadow-xs" 
+                    : "text-[#57534E] dark:text-[#D6D3D1] hover:text-black dark:hover:text-white"
+                }`}
+              >
+                <Camera className="w-4 h-4 inline-block mr-2" />
+                Media
+              </button>
+            )}
           </div>
           <button 
             id="close-capture-btn"

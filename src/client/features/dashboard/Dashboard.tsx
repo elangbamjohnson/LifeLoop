@@ -19,9 +19,12 @@ import {
   LogOut, 
   X, 
   ChevronDown,
-  MoreHorizontal
+  MoreHorizontal,
+  Sun,
+  Moon
 } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
+import { useTheme } from "../../hooks/useTheme";
 import { createPortal } from "react-dom";
 import { CaptureDialog } from "./CaptureDialog";
 import { ItemCard } from "./ItemCard";
@@ -40,6 +43,7 @@ import { getTabClientId } from "../../utils/tabId";
 
 export function Dashboard() {
   const { user, loading: authLoading, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const isAdmin = Boolean(!authLoading && user?.isAdmin);
   const [activeTab, setActiveTab] = useState<"priority" | "timeline" | "captures" | "ask" | "graph" | "family">("priority");
   const [familyUnreadCount, setFamilyUnreadCount] = useState(0);
@@ -591,6 +595,21 @@ export function Dashboard() {
           {/* Settings & Profile Actions */}
           <div className="actions-container">
             <button
+              id="theme-toggle-btn"
+              type="button"
+              onClick={toggleTheme}
+              className="touch-target-48 min-w-[48px] min-h-[48px] flex items-center justify-center p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-[#78716C] dark:text-[#A8A29E] shrink-0"
+              title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+              aria-label={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            >
+              {theme === "dark" ? (
+                <Sun className="w-5 h-5 text-amber-400" />
+              ) : (
+                <Moon className="w-5 h-5 text-[#78716C]" />
+              )}
+            </button>
+
+            <button
               ref={prefsBtnRef}
               id="reminder-preferences-btn"
               type="button"
@@ -646,6 +665,31 @@ export function Dashboard() {
                       <p className="text-xs font-medium text-[#1C1917] dark:text-[#FDFBF7] truncate mt-0.5">{user.email}</p>
                     </div>
                     <div className="p-1.5 space-y-0.5">
+                      <button
+                        id="profile-theme-btn"
+                        role="menuitem"
+                        type="button"
+                        onClick={() => {
+                          toggleTheme();
+                          setIsProfileMenuOpen(false);
+                          profileBtnRef.current?.focus();
+                        }}
+                        className="touch-target-48 min-h-[48px] w-full flex items-center gap-2 px-3 py-2 text-xs text-[#1C1917] dark:text-[#FDFBF7] hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition-colors text-left"
+                        title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                        aria-label={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                      >
+                        {theme === "dark" ? (
+                          <>
+                            <Sun className="w-4 h-4 text-amber-400 shrink-0" />
+                            <span className="font-medium">Light Mode</span>
+                          </>
+                        ) : (
+                          <>
+                            <Moon className="w-4 h-4 text-[#78716C] dark:text-[#A8A29E] shrink-0" />
+                            <span className="font-medium">Dark Mode</span>
+                          </>
+                        )}
+                      </button>
                       <button
                         id="profile-preferences-btn"
                         role="menuitem"
@@ -1550,6 +1594,7 @@ export function Dashboard() {
           ──────────────────────────────────────────────────────────────────── */}
       <CaptureDialog
         isOpen={isCaptureOpen}
+        isAdmin={isAdmin}
         onClose={() => {
           setIsCaptureOpen(false);
           setTimeout(() => {
