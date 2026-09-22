@@ -42,7 +42,13 @@ describe('Phase 0: Authentication, Session Management & Authorization (P0/P1)', 
     expect(res.body.user).toBeDefined();
     expect(res.body.user.email).toBe(testUserAEmail.toLowerCase());
     expect(res.body.user.passwordHash).toBeUndefined(); // No secret leakage
-    expect(res.headers['set-cookie']).toBeUndefined();
+    
+    // Phase 7.5A-2: Registration now issues a session cookie immediately so the 
+    // client can authenticate against /auth/me to poll for verification status.
+    const cookies = Array.isArray(res.headers['set-cookie']) ? res.headers['set-cookie'] : [res.headers['set-cookie'] as string];
+    expect(cookies).toBeDefined();
+    expect(cookies.find((c: string) => c && c.startsWith('session='))).toBeDefined();
+    
     userAId = res.body.user.id;
 
     // Activate user and login to get session cookie
@@ -52,9 +58,9 @@ describe('Phase 0: Authentication, Session Management & Authorization (P0/P1)', 
       .send({ email: testUserAEmail, password: validPassword });
 
     // Verify session cookie
-    const cookies = Array.isArray(loginRes.headers['set-cookie']) ? loginRes.headers['set-cookie'] : [loginRes.headers['set-cookie'] as string];
-    expect(cookies).toBeDefined();
-    const sessionCookie = cookies.find((c: string) => c && c.startsWith('session='));
+    const loginCookies = Array.isArray(loginRes.headers['set-cookie']) ? loginRes.headers['set-cookie'] : [loginRes.headers['set-cookie'] as string];
+    expect(loginCookies).toBeDefined();
+    const sessionCookie = loginCookies.find((c: string) => c && c.startsWith('session='));
     expect(sessionCookie).toBeDefined();
     expect(sessionCookie).toContain('HttpOnly');
 

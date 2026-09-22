@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+delete process.env.http_proxy;
+delete process.env.https_proxy;
+delete process.env.HTTP_PROXY;
+delete process.env.HTTPS_PROXY;
 import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
@@ -116,6 +120,9 @@ describe('Route Inventory & Input Validation Coverage', () => {
       else continue;
 
       const res = await reqCall;
+      if (res.status !== 400 || !String(res.body?.error || '').includes('Invalid identifier format')) {
+        console.error(`Route validation failed for: ${route.method} ${targetUrl}`, res.status, res.body, res.text, res.headers);
+      }
       expect(res.status).toBe(400);
       expect(String(res.body?.error || '')).toContain('Invalid identifier format');
     }

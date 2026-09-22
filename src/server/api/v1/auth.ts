@@ -34,7 +34,6 @@ const resendLimiter = rateLimit({
 const resendAccountLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 3, // 3 per email
-  keyGenerator: (req) => req.body.email || req.ip,
   skip: () => process.env.DISABLE_RATE_LIMIT === "1",
   message: { error: "Too many resend attempts, please try again later" },
   validate: { xForwardedForHeader: false, default: true }
@@ -88,7 +87,7 @@ authRouter.post("/register", authLimiter, async (req, res, next) => {
       });
     });
 
-    const verifyUrl = `${req.protocol}://${req.get("host")}/api/v1/auth/verify-email?token=${tokenRaw}`;
+    const verifyUrl = `${req.protocol}://${req.get("host")}/verify-email?token=${tokenRaw}`;
     
     // Async send email
     getEmailProvider().sendVerificationEmail({
@@ -97,7 +96,22 @@ authRouter.post("/register", authLimiter, async (req, res, next) => {
       expiresAt,
     }).catch(() => {});
 
-    // Do NOT issue session cookie for pending user
+    // Issue session cookie for pending user
+    // Issue session cookie for pending user
+    const sessionToken = jwt.sign(
+      { userId: user.id },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    const isSecure = process.env.NODE_ENV === "production" || req.secure || (req.headers["x-forwarded-proto"] === "https");
+    res.cookie("session", sessionToken, {
+      httpOnly: true,
+      secure: isSecure,
+      sameSite: isSecure ? "none" : "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
     res.status(201).json({ user: { id: user!.id, email: user!.email, isAdmin: Boolean(user!.isAdmin), accountStatus: user!.accountStatus } });
   } catch (error) {
     next(error);
@@ -248,7 +262,7 @@ authRouter.post("/resend-verification", resendLimiter, resendAccountLimiter, asy
         });
       });
 
-      const verifyUrl = `${req.protocol}://${req.get("host")}/api/v1/auth/verify-email?token=${tokenRaw}`;
+      const verifyUrl = `${req.protocol}://${req.get("host")}/verify-email?token=${tokenRaw}`;
       getEmailProvider().sendVerificationEmail({
         to: normalizedEmail,
         verifyUrl,
@@ -307,7 +321,7 @@ authRouter.post("/change-email", authLimiter, async (req, res, next) => {
         expiresAt,
       });
 
-      const verifyUrl = `${req.protocol}://${req.get("host")}/api/v1/auth/verify-email?token=${tokenRaw}`;
+      const verifyUrl = `${req.protocol}://${req.get("host")}/verify-email?token=${tokenRaw}`;
       getEmailProvider().sendVerificationEmail({
         to: normalizedNewEmail,
         verifyUrl,

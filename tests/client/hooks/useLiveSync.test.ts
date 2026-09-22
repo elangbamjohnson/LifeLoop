@@ -310,6 +310,43 @@ describe('useLiveSync Hook', () => {
     unmount();
   });
 
+  it('7c. Item 1c: stops entirely when /auth/me returns pending_verification on error', async () => {
+    // Return 200 with pending_verification
+    fetchMock.mockResolvedValueOnce({ 
+      status: 200, 
+      ok: true, 
+      json: async () => ({ user: { accountStatus: 'pending_verification' } }) 
+    });
+    
+    const onAuthError = vi.fn();
+    const onSync = vi.fn();
+    
+    const { unmount } = renderHook(() => useLiveSync({ onAuthError, onSync, tabId: 'tab-1' }));
+    
+    const es = MockEventSource.instances[0];
+
+    await act(async () => {
+      es.emitError(new Event('error'));
+      await Promise.resolve(); // flush microtasks for fetch
+    });
+
+    // Should fetch /auth/me once to check
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(onAuthError).not.toHaveBeenCalled();
+
+    // The EventSource should be closed and no new reconnects or polling should occur
+    expect(es.readyState).toBe(2);
+
+    act(() => {
+      vi.advanceTimersByTime(60000);
+    });
+    
+    // No new instances should be created
+    expect(MockEventSource.instances.length).toBe(1);
+    expect(onSync).not.toHaveBeenCalled();
+    unmount();
+  });
+
   it('8. StrictMode: only one EventSource open at a time', () => {
     const { unmount } = renderHook(() => useLiveSync({ tabId: 'strict-mode-tab' }), {
       wrapper: ({ children }) => React.createElement(React.StrictMode, null, children),

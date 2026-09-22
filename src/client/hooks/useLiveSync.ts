@@ -220,10 +220,23 @@ export function useLiveSync({
       // so call /api/v1/auth/me to check if session expired
       if (typeof fetch === 'function') {
         fetch('/api/v1/auth/me')
-          .then((res) => {
+          .then(async (res) => {
             if (!isMountedRef.current || stoppedRef.current) return;
             if (res.status === 401 || res.status === 403) {
               handleAuthFailure();
+              return;
+            }
+            if (res.ok) {
+              try {
+                const data = await res.json();
+                if (data.user?.accountStatus === 'pending_verification') {
+                  stoppedRef.current = true;
+                  closeEventSource();
+                  stopFallbackPolling();
+                }
+              } catch (e) {
+                // ignore JSON parse errors
+              }
             }
           })
           .catch(() => {

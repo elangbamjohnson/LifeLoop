@@ -25,7 +25,8 @@ describe("Phase 7.5A-1 Email Verification", () => {
 
     expect(res.status).toBe(201);
     expect(res.body.user.accountStatus).toBe("pending_verification");
-    expect(res.headers["set-cookie"]).toBeUndefined(); // no session cookie
+    const cookies = Array.isArray(res.headers['set-cookie']) ? res.headers['set-cookie'] : [res.headers['set-cookie'] as string];
+    expect(cookies).toBeDefined();
 
     const user = await db.select().from(users).where(eq(users.email, "testreg@example.com")).limit(1);
     expect(user[0].accountStatus).toBe("pending_verification");
@@ -248,18 +249,18 @@ describe("Phase 7.5A-1 Email Verification", () => {
     // getting a token somehow, or using an old token before account was suspended/pending
     
     // We register normally
-    await request(app)
+    const regRes = await request(app)
       .post("/api/v1/auth/register")
       .send({ email: "testprotected@example.com", password: "Password123!" });
 
     const userRecord = await db.select().from(users).where(eq(users.email, "testprotected@example.com")).limit(1);
     const userId = userRecord[0].id;
 
-    // Sign a token for them
-    const JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-key-for-tests-only';
-    const token = jwt.sign({ userId }, JWT_SECRET, { expiresIn: "1h" });
-    
-    const cookie = `session=${token}`;
+    // Use the actual session cookie issued by registration
+    const cookies = Array.isArray(regRes.headers['set-cookie']) ? regRes.headers['set-cookie'] : [regRes.headers['set-cookie'] as string];
+    const sessionCookieStr = cookies.find((c: string) => c && c.startsWith('session='));
+    expect(sessionCookieStr).toBeDefined();
+    const cookie = sessionCookieStr!.split(';')[0];
 
     const routes = [
       { path: "/api/v1/items", method: "get" },

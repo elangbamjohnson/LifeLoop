@@ -11,7 +11,7 @@ export interface EmailProvider {
 }
 
 export class TransactionalEmailProvider implements EmailProvider {
-  private transporter: nodemailer.Transporter;
+  private transporter: ReturnType<typeof nodemailer.createTransport>;
 
   constructor() {
     this.transporter = nodemailer.createTransport({
@@ -43,12 +43,14 @@ export class TransactionalEmailProvider implements EmailProvider {
 }
 
 export class MockEmailProvider implements EmailProvider {
-  public emails: Array<{ to: string; subject: string; verifyUrl: string; sentAt: Date }> = [];
+  public emails: Array<{ to: string; subject: string; text?: string; html?: string; verifyUrl: string; sentAt: Date }> = [];
 
   async sendVerificationEmail(args: VerificationEmailArgs): Promise<void> {
     this.emails.push({
       to: args.to,
       subject: "Verify your LifeLoop email address",
+      text: `Please verify your email address by visiting the following link: \n\n${args.verifyUrl}\n\nThis link will expire at ${args.expiresAt.toISOString()}.`,
+      html: `<p>Please verify your email address by clicking the link below:</p><p><a href="${args.verifyUrl}">Verify Email</a></p><p>This link will expire at ${args.expiresAt.toISOString()}.</p>`,
       verifyUrl: args.verifyUrl,
       sentAt: new Date(),
     });

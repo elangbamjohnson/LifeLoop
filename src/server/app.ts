@@ -73,6 +73,21 @@ export function createApp(options: CreateAppOptions = {}): express.Application {
     app.use(options.customPath, options.customRouter);
   }
 
+  // E2E Test utilities
+  if (process.env.EMAIL_PROVIDER === 'mock') {
+    app.get("/api/v1/test/mock-emails", async (req, res) => {
+      const { getEmailProvider } = await import("./services/EmailProvider");
+      const provider: any = getEmailProvider();
+      res.json(provider.emails || []);
+    });
+    app.delete("/api/v1/test/mock-emails", async (req, res) => {
+      const { getEmailProvider } = await import("./services/EmailProvider");
+      const provider: any = getEmailProvider();
+      provider.emails = [];
+      res.json({ success: true });
+    });
+  }
+
   // Health & Readiness probes
   app.use(healthRouter);
 
