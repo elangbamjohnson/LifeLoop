@@ -5,6 +5,7 @@ type Theme = "dark" | "light";
 interface ThemeContextType {
   theme: Theme;
   setTheme: (theme: Theme) => void;
+  toggleTheme: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -15,7 +16,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem("lifeloop-theme") as Theme;
       if (stored) return stored;
-      if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
         return "dark";
       }
     }
@@ -29,8 +30,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem("lifeloop-theme", theme);
   }, [theme]);
 
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  };
+
   return (
-    <ThemeContext.Provider value={{ theme, setTheme }}>
+    <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>
       {children}
     </ThemeContext.Provider>
   );
