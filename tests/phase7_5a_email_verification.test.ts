@@ -282,11 +282,14 @@ describe("Phase 7.5A-1 Email Verification", () => {
       expect(res.body.error).toContain("Please verify your email");
     }
 
-    // /api/v1/auth/me should return limited info
+    // /api/v1/auth/me should return exactly the limited info
     const meRes = await request(app).get("/api/v1/auth/me").set("Cookie", cookie);
     expect(meRes.status).toBe(200);
-    expect(meRes.body.user.isPending).toBe(true);
-    expect(meRes.body.user.accountStatus).toBe("pending_verification");
+    expect(meRes.body.user).toEqual({
+      id: userId,
+      email: "testprotected@example.com",
+      accountStatus: "pending_verification"
+    });
   });
 
   it("Provider-failure resilience: registration succeeds even if email provider throws", async () => {

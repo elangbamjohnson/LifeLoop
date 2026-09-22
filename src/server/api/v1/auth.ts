@@ -356,7 +356,7 @@ authRouter.get("/me", requireAuth, async (req: AuthenticatedRequest, res, next) 
     }
     
     if (user.accountStatus === 'pending_verification') {
-      return res.json({ user: { id: user.id, email: user.email, accountStatus: user.accountStatus, isPending: true } });
+      return res.json({ user: { id: user.id, email: user.email, accountStatus: user.accountStatus } });
     }
     
     res.json({ user: { id: user.id, email: user.email, isAdmin: Boolean(user.isAdmin), accountStatus: user.accountStatus } });
