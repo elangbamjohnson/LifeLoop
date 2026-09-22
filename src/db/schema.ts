@@ -9,6 +9,7 @@ import {
   real,
   unique,
   boolean,
+  index,
 } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
@@ -17,9 +18,23 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   isAdmin: boolean("is_admin").notNull().default(false),
   settings: jsonb("settings").default({}),
+  emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
+  accountStatus: varchar("account_status", { length: 50 }).default("pending_verification").notNull(), // 'pending_verification' | 'active' | 'suspended'
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
 });
+
+export const emailVerificationTokens = pgTable("email_verification_tokens", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  userIdIdx: index("evt_user_id_idx").on(t.userId),
+  tokenHashIdx: index("evt_token_hash_idx").on(t.tokenHash),
+}));
 
 export const captures = pgTable("captures", {
   id: uuid("id").primaryKey().defaultRandom(),

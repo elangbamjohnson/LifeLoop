@@ -121,6 +121,7 @@ describe('Admin Access & Privileges (Vitest Integration)', () => {
     });
 
     it('should return user.isAdmin in /auth/login', async () => {
+      await db.update(users).set({ accountStatus: 'active' }).where(eq(users.email, tamperEmail));
       const res = await request(app)
         .post('/api/v1/auth/login')
         .send({ email: tamperEmail, password });

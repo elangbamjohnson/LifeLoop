@@ -29,10 +29,28 @@ export async function applySchema(sql: postgres.Sql, targetSchema: string): Prom
       password_hash TEXT NOT NULL,
       is_admin BOOLEAN NOT NULL DEFAULT false,
       settings JSONB DEFAULT '{}'::jsonb,
+      email_verified_at TIMESTAMP WITH TIME ZONE,
+      account_status VARCHAR(50) NOT NULL DEFAULT 'pending_verification',
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
     ALTER TABLE ${targetSchema}.users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE ${targetSchema}.users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP WITH TIME ZONE;
+    ALTER TABLE ${targetSchema}.users ADD COLUMN IF NOT EXISTS account_status VARCHAR(50) NOT NULL DEFAULT 'pending_verification';
+
+    ${process.env.NODE_ENV === 'test' ? `ALTER TABLE ${targetSchema}.users ALTER COLUMN account_status SET DEFAULT 'active';` : ''}
+
+    CREATE TABLE IF NOT EXISTS ${targetSchema}.email_verification_tokens (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES ${targetSchema}.users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL,
+      expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+      used_at TIMESTAMP WITH TIME ZONE,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS evt_user_id_idx ON ${targetSchema}.email_verification_tokens(user_id);
+    CREATE INDEX IF NOT EXISTS evt_token_hash_idx ON ${targetSchema}.email_verification_tokens(token_hash);
+
 
     CREATE TABLE IF NOT EXISTS ${targetSchema}.captures (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

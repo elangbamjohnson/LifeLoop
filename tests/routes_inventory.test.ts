@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
@@ -14,8 +14,22 @@ import { askRouter } from '../src/server/api/v1/ask';
 import { healthRouter } from '../src/server/api/health';
 import { errorHandler } from '../src/server/middlewares/errorHandler';
 import { UUID_PARAM_REGEX } from '../src/server/middlewares/validation';
+import { users } from '../src/db/schema';
+import { eq } from 'drizzle-orm';
 
 describe('Route Inventory & Input Validation Coverage', () => {
+  beforeAll(async () => {
+    await db.insert(users).values({
+      id: '00000000-0000-0000-0000-000000000001',
+      email: 'routes_inventory@example.com',
+      passwordHash: 'dummy',
+      accountStatus: 'active'
+    });
+  });
+
+  afterAll(async () => {
+    await db.delete(users).where(eq(users.id, '00000000-0000-0000-0000-000000000001'));
+  });
   const routers = [
     { name: 'itemsRouter', prefix: '/api/v1/items', router: itemsRouter },
     { name: 'familiesRouter', prefix: '/api/v1/families', router: familiesRouter },

@@ -42,12 +42,19 @@ describe('Phase 0: Authentication, Session Management & Authorization (P0/P1)', 
     expect(res.body.user).toBeDefined();
     expect(res.body.user.email).toBe(testUserAEmail.toLowerCase());
     expect(res.body.user.passwordHash).toBeUndefined(); // No secret leakage
+    expect(res.headers['set-cookie']).toBeUndefined();
     userAId = res.body.user.id;
 
+    // Activate user and login to get session cookie
+    await db.update(users).set({ accountStatus: 'active' }).where(eq(users.id, userAId));
+    const loginRes = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: testUserAEmail, password: validPassword });
+
     // Verify session cookie
-    const cookies = Array.isArray(res.headers['set-cookie']) ? res.headers['set-cookie'] : [res.headers['set-cookie'] as string];
+    const cookies = Array.isArray(loginRes.headers['set-cookie']) ? loginRes.headers['set-cookie'] : [loginRes.headers['set-cookie'] as string];
     expect(cookies).toBeDefined();
-    const sessionCookie = cookies.find((c: string) => c.startsWith('session='));
+    const sessionCookie = cookies.find((c: string) => c && c.startsWith('session='));
     expect(sessionCookie).toBeDefined();
     expect(sessionCookie).toContain('HttpOnly');
 
@@ -184,8 +191,10 @@ describe('Phase 0: Authentication, Session Management & Authorization (P0/P1)', 
       .post('/api/v1/auth/register')
       .send({ email: testUserBEmail, password: validPassword });
     userBId = regB.body.user.id;
-    const setCookiesB = Array.isArray(regB.headers['set-cookie']) ? regB.headers['set-cookie'] : [regB.headers['set-cookie'] as string];
-    const cookieB = setCookiesB.find((c: string) => c.startsWith('session='))!.split(';')[0];
+    await db.update(users).set({ accountStatus: 'active' }).where(eq(users.id, userBId));
+    const loginB = await request(app).post('/api/v1/auth/login').send({ email: testUserBEmail, password: validPassword });
+    const setCookiesB = Array.isArray(loginB.headers['set-cookie']) ? loginB.headers['set-cookie'] : [loginB.headers['set-cookie'] as string];
+    const cookieB = setCookiesB.find((c: string) => c && c.startsWith('session='))!.split(';')[0];
 
     // User A creates a private item
     const itemRes = await request(app)
