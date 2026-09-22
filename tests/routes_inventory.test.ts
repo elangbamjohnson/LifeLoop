@@ -27,9 +27,9 @@ describe('Route Inventory & Input Validation Coverage', () => {
     { name: 'healthRouter', prefix: '/api/v1/health', router: healthRouter },
   ];
 
-  const validToken = jwt.sign(
+  const getValidToken = () => jwt.sign(
     { userId: '00000000-0000-0000-0000-000000000001' },
-    process.env.JWT_SECRET || 'local_dev_secret_key'
+    process.env.JWT_SECRET || 'test-jwt-secret-key-for-tests-only'
   );
 
   it('should inventory every route and ensure all id parameters matching /^id$|Id$/ are covered by UUID validation', async () => {
@@ -95,17 +95,14 @@ describe('Route Inventory & Input Validation Coverage', () => {
       targetUrl = targetUrl.replace(/:[a-zA-Z0-9_]+/g, 'dummy_token');
 
       let reqCall: any;
-      if (route.method === 'GET') reqCall = request(app).get(targetUrl);
-      else if (route.method === 'POST') reqCall = request(app).post(targetUrl).send({});
-      else if (route.method === 'PATCH') reqCall = request(app).patch(targetUrl).send({});
-      else if (route.method === 'DELETE') reqCall = request(app).delete(targetUrl);
+      if (route.method === 'GET') reqCall = request(app).get(targetUrl).set('Cookie', `session=${getValidToken()}`);
+      else if (route.method === 'POST') reqCall = request(app).post(targetUrl).set('Cookie', `session=${getValidToken()}`).send({});
+      else if (route.method === 'PATCH') reqCall = request(app).patch(targetUrl).set('Cookie', `session=${getValidToken()}`).send({});
+      else if (route.method === 'DELETE') reqCall = request(app).delete(targetUrl).set('Cookie', `session=${getValidToken()}`);
       else continue;
 
-      const res = await reqCall.set('Cookie', `session=${validToken}`);
+      const res = await reqCall;
       expect(res.status).toBe(400);
-      if (typeof res.body?.error !== 'string') {
-        console.log('NO STRING ERROR ON ROUTE:', route.method, route.fullPath, 'body:', res.body);
-      }
       expect(String(res.body?.error || '')).toContain('Invalid identifier format');
     }
   });
@@ -114,15 +111,19 @@ describe('Route Inventory & Input Validation Coverage', () => {
     const app = express();
     app.use(express.json());
     app.use(cookieParser());
+    app.use((req, _res, next) => {
+      (req as any).userId = '00000000-0000-0000-0000-000000000001';
+      next();
+    });
     app.use('/api/v1/items', itemsRouter);
     app.use(errorHandler);
 
     const res = await request(app)
       .get('/api/v1/items?familyId=not-a-valid-uuid')
-      .set('Cookie', `session=${validToken}`);
+      .set('Cookie', `session=${getValidToken()}`);
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain("Invalid identifier format for query parameter 'familyId'");
+    expect(res.body?.error).toContain("Invalid identifier format for query parameter 'familyId'");
   });
 
   it('should stop missing required fields in validation before the database query is executed', async () => {
@@ -137,7 +138,7 @@ describe('Route Inventory & Input Validation Coverage', () => {
 
     const res = await request(app)
       .post('/api/v1/relations')
-      .set('Cookie', `session=${validToken}`)
+      .set('Cookie', `session=${getValidToken()}`)
       .send({
         sourceItemId: '00000000-0000-0000-0000-000000000001',
         // targetItemId missing!
