@@ -17,16 +17,16 @@ if (!JWT_SECRET) {
 }
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,
-  skip: () => process.env.DISABLE_RATE_LIMIT === "1",
-  message: { error: "Too many login attempts, please try again later" },
+  max: 5, // Limit each IP to 5 requests per `window`
+  message: { error: "Too many requests, please try again later" },
+  skip: (req) => process.env.DISABLE_RATE_LIMIT === "1" && req.headers['x-force-rate-limit'] !== "1",
   validate: { xForwardedForHeader: false, default: true }
 });
 
 const resendLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 10, // 10 per IP
-  skip: () => process.env.DISABLE_RATE_LIMIT === "1",
+  skip: (req) => process.env.DISABLE_RATE_LIMIT === "1" && req.headers['x-force-rate-limit'] !== "1",
   message: { error: "Too many resend attempts, please try again later" },
   validate: { xForwardedForHeader: false, default: true }
 });
@@ -34,7 +34,7 @@ const resendLimiter = rateLimit({
 const resendAccountLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 3, // 3 per email
-  skip: () => process.env.DISABLE_RATE_LIMIT === "1",
+  skip: (req) => process.env.DISABLE_RATE_LIMIT === "1" && req.headers['x-force-rate-limit'] !== "1",
   message: { error: "Too many resend attempts, please try again later" },
   validate: { xForwardedForHeader: false, default: true }
 });

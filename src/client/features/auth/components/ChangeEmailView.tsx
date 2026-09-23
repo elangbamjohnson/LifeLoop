@@ -20,7 +20,7 @@ export function ChangeEmailView({ currentEmail, onSuccess, onCancel }: ChangeEma
       const res = await fetch("/api/v1/auth/change-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: currentEmail, newEmail }),
+        body: JSON.stringify({ currentEmail, newEmail }),
       });
 
       const data = await res.json();

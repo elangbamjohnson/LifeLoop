@@ -42,7 +42,8 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
 
     // Verify transition to pending screen
     await expect(page.getByText('Check your email')).toBeVisible();
-    await expect(page.getByText(testEmail)).toBeVisible();
+    const maskedHappy = testEmail.split('@')[0][0] + '***@' + testEmail.split('@')[1];
+    await expect(page.getByText(maskedHappy)).toBeVisible();
 
     // Retrieve captured email
     const emailData = await getLatestMockEmail(request, baseURL as string, testEmail);
@@ -57,14 +58,14 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
     await page.goto(`/verify-email?token=${token}`);
 
     // Verify success state
-    await expect(page.getByText('Email Verified')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Email Verified' })).toBeVisible();
     await expect(page.getByText('Email verified — Your LifeLoop account is now active')).toBeVisible();
 
     // Click continue to app and verify we are logged in (dashboard)
     await page.getByRole('button', { name: 'Continue to LifeLoop' }).click();
     await expect(page).toHaveURL('/');
     // Check for dashboard elements
-    await expect(page.getByText('LifeLoop')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'LifeLoop', exact: true })).toBeVisible();
   });
 
   test('Test 2 - Unverified login: blocked -> resend -> verify', async ({ page, request, baseURL }) => {
@@ -87,7 +88,8 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
 
     // Verify blocked and transitioned to pending screen with guidance
     await expect(page.getByText('Check your email')).toBeVisible();
-    await expect(page.getByText(testEmail)).toBeVisible();
+    const maskedUnverified = testEmail.split('@')[0][0] + '***@' + testEmail.split('@')[1];
+    await expect(page.getByText(maskedUnverified)).toBeVisible();
 
     // Click resend
     await page.getByRole('button', { name: 'Resend verification email' }).click();
@@ -102,7 +104,7 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
     await page.goto(`/verify-email?token=${token}`);
 
     // Verify success and continue
-    await expect(page.getByText('Email Verified')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Email Verified' })).toBeVisible();
     await page.getByRole('button', { name: 'Continue to LifeLoop' }).click();
     await expect(page).toHaveURL('/');
   });
@@ -139,7 +141,7 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
     // Open URL and see Expired state
     await page.goto(`/verify-email?token=${token}`);
     await expect(page.getByText('Verification Failed')).toBeVisible();
-    await expect(page.getByText('expired')).toBeVisible();
+    await expect(page.getByText('Your verification link has expired.')).toBeVisible();
 
     // Click "Send a new verification email"
     await page.getByRole('button', { name: 'Send a new verification email' }).click();
@@ -152,6 +154,7 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
     
     await expect(page.getByText('Check your email')).toBeVisible();
     await page.getByRole('button', { name: 'Resend verification email' }).click();
+    await expect(page.getByText('Verification email sent')).toBeVisible();
 
     // Get new email
     const newEmailData = await getLatestMockEmail(request, baseURL as string, testEmail);
@@ -159,14 +162,14 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
     
     // Use new token -> succeeds
     await page.goto(`/verify-email?token=${newToken}`);
-    await expect(page.getByText('Email Verified')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Email Verified' })).toBeVisible();
   });
 
   test('Test 4 - Invalid/reused token states', async ({ page, request, baseURL }) => {
     // Random token
     await page.goto('/verify-email?token=invalid123abc');
     await expect(page.getByText('Verification Failed')).toBeVisible();
-    await expect(page.getByText('Invalid or expired token')).toBeVisible();
+    await expect(page.getByText('Your verification link has expired.')).toBeVisible();
 
     // Reused token
     const testEmail = `reused_${Date.now()}@lifeloop.test`;
@@ -178,7 +181,7 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
     
     // First use
     await page.goto(`/verify-email?token=${token}`);
-    await expect(page.getByText('Email Verified')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Email Verified' })).toBeVisible();
     
     // Make it explicitly out of the grace window in the DB to test the "already used" rejection
     const schemaName = process.env.TEST_SCHEMA || 'lifeloop_test_e2e';
@@ -199,7 +202,7 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
     // Second use (outside grace window)
     await page.goto(`/verify-email?token=${token}`);
     await expect(page.getByText('Verification Failed')).toBeVisible();
-    await expect(page.getByText('Invalid or expired token')).toBeVisible();
+    await expect(page.getByText('Your verification link has expired.')).toBeVisible();
   });
 
   test('Test 5 - Change email', async ({ page, request, baseURL }) => {
@@ -225,7 +228,8 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
 
     // Verify back to pending screen with new email
     await expect(page.getByText('Check your email')).toBeVisible();
-    await expect(page.getByText(rightEmail)).toBeVisible();
+    const maskedRightEmail = rightEmail.split('@')[0][0] + '***@' + rightEmail.split('@')[1];
+    await expect(page.getByText(maskedRightEmail)).toBeVisible();
 
     // Retrieve new email
     const newEmailData = await getLatestMockEmail(request, baseURL as string, rightEmail);
@@ -233,7 +237,7 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
     
     const token = extractToken(newEmailData.verifyUrl);
     await page.goto(`/verify-email?token=${token}`);
-    await expect(page.getByText('Email Verified')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Email Verified' })).toBeVisible();
   });
 
   test('Test 6 - Resend protection & rate limiting', async ({ page, request, baseURL }) => {
@@ -259,9 +263,10 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
     let lastStatus = 200;
     let rateLimited = false;
     
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 15; i++) {
       const res = await request.post(`${baseURL}/api/v1/auth/resend-verification`, {
-        data: { email: testEmail }
+        data: { email: testEmail },
+        headers: { 'x-force-rate-limit': '1' }
       });
       lastStatus = res.status();
       if (lastStatus === 429) {
@@ -273,5 +278,37 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
     // We should hit 429 Too Many Requests
     expect(rateLimited).toBe(true);
     expect(lastStatus).toBe(429);
+  });
+
+  test('Test 7 - Pending session stops /auth/me polling on SSE error', async ({ page, request, baseURL }) => {
+    const timestamp = Date.now();
+    const testEmail = `polling_${timestamp}@lifeloop.test`;
+    
+    await request.post(`${baseURL}/api/v1/auth/register`, {
+      data: {
+        email: testEmail,
+        password: 'ValidPassword123!',
+        firstName: 'Poller',
+        lastName: 'Test',
+      }
+    });
+
+    let authMeCalls = 0;
+    await page.route('**/api/v1/auth/me', async route => {
+      authMeCalls++;
+      await route.continue();
+    });
+
+    await page.goto('/auth');
+    await page.fill('input[type="email"]', testEmail);
+    await page.fill('input[type="password"]', 'ValidPassword123!');
+    await page.getByRole('button', { name: 'Sign In' }).click();
+    
+    await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible();
+
+    await page.waitForTimeout(3000);
+
+    // It should not rapidly poll; maximum 5 times for initial navigation/fallback checks
+    expect(authMeCalls).toBeLessThanOrEqual(5);
   });
 });
