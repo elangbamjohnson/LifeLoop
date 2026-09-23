@@ -48,7 +48,7 @@ function generateToken() {
 // Register
 authRouter.post("/register", authLimiter, async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, timezone } = req.body;
     
     if (!email || typeof email !== "string" || !password || typeof password !== "string") {
       return res.status(400).json({ error: "Email and password required" });
@@ -77,7 +77,12 @@ authRouter.post("/register", authLimiter, async (req, res, next) => {
     await db.transaction(async (tx) => {
       [user] = await tx
         .insert(users)
-        .values({ email: normalizedEmail, passwordHash, accountStatus: 'pending_verification' })
+        .values({ 
+          email: normalizedEmail, 
+          passwordHash, 
+          accountStatus: 'pending_verification',
+          settings: { timezone: timezone || "UTC" }
+        })
         .returning({ id: users.id, email: users.email, isAdmin: users.isAdmin, accountStatus: users.accountStatus });
 
       await tx.insert(emailVerificationTokens).values({
