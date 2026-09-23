@@ -175,11 +175,19 @@ export class GeminiAIProvider implements AIProvider {
     const autoRemindersEnabled = userSettings.autoReminders === true;
     const userTimezone = userSettings.timezone || "UTC";
 
-    const todayStr = new Date().toISOString().split("T")[0];
+    const now = new Date();
+    const todayStr = new Intl.DateTimeFormat("en-CA", { 
+      timeZone: userTimezone, 
+      year: "numeric", 
+      month: "2-digit", 
+      day: "2-digit" 
+    }).format(now);
+    const currentTimeStr = now.toLocaleString("en-US", { timeZone: userTimezone, timeZoneName: "shortOffset" });
 
     const prompt = `You are LifeLoop, an intelligent personal life assistant.
 Extract all structured actionable items, deadlines, obligations, or entities from this user capture.
-Reference date: Today is ${todayStr}.
+User's Timezone: ${userTimezone}
+Current Date and Time: ${currentTimeStr} (Assume this is "now" when interpreting relative times like "today", "tomorrow", or "at 7pm").
 
 Classification Rules for itemType:
 - "document": Receipts, maintenance records, service invoices, oil changes, tire rotations, warranties, registration papers, identity docs, leases. IMPORTANT: NEVER classify a maintenance receipt, service record, or repair bill as "vehicle" or "home" entity!
@@ -200,7 +208,7 @@ Return ONLY valid JSON adhering strictly to this schema:
     {
       "title": "Clear, concise title (e.g. Geico Car Insurance Renewal, Downtown Auto Care Oil Change, Mr. Henderson Pipe Repair)",
       "itemType": "renewal" | "payment" | "waiting_for" | "subscription" | "document" | "appointment" | "vehicle" | "home" | "task",
-      "dueDate": "ISO 8601 string timestamp (e.g. 2026-10-15T09:00:00Z) or null if no deadline/due date mentioned",
+      "dueDate": "ISO 8601 string timestamp with correct timezone offset (e.g. 2026-10-15T09:00:00-04:00) or null if no deadline/due date mentioned",
       "confidenceScore": 0.95,
       "metadata": {
         "amount": 185.50 or null,
