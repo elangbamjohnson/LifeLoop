@@ -290,7 +290,10 @@ export function Dashboard() {
 
     const res = await fetch("/api/v1/captures", {
       method: "POST",
-      headers: { "X-Client-Id": tabId },
+      headers: { 
+        "X-Client-Id": tabId,
+        "X-Timezone": Intl.DateTimeFormat().resolvedOptions().timeZone
+      },
       body: formData,
     });
     if (res.ok) {

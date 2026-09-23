@@ -77,7 +77,8 @@ capturesRouter.post("/", requireAuth, upload.single("file"), async (req: Authent
     res.status(201).json({ capture });
 
     // Kick off async processing (fire and forget for now)
-    processCaptureAsync(capture.id, req.userId!, capture.rawPayload, capture.type, (req as any).log).catch(e => {
+    const clientTimezone = req.headers['x-timezone'] as string | undefined;
+    processCaptureAsync(capture.id, req.userId!, capture.rawPayload, capture.type, (req as any).log, clientTimezone).catch(e => {
       (req as any).log?.error(e, `Async processing failed for capture ${capture.id}`);
     });
 
@@ -87,10 +88,10 @@ capturesRouter.post("/", requireAuth, upload.single("file"), async (req: Authent
 });
 
 // Async processing helper
-async function processCaptureAsync(captureId: string, userId: string, payload: string, type: string, logger: any) {
+async function processCaptureAsync(captureId: string, userId: string, payload: string, type: string, logger: any, clientTimezone?: string) {
   try {
     await db.update(captures).set({ processingStatus: "processing" }).where(eq(captures.id, captureId));
-    await aiProvider.processCapture(captureId, userId, payload, type);
+    await aiProvider.processCapture(captureId, userId, payload, type, clientTimezone);
     await db.update(captures).set({ processingStatus: "completed" }).where(eq(captures.id, captureId));
     eventBus.publish(userId, {
       type: "changed",

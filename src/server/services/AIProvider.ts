@@ -5,7 +5,7 @@ import { reminderService } from "./ReminderService";
 import { GoogleGenAI } from "@google/genai";
 
 export interface AIProvider {
-  processCapture(captureId: string, userId: string, rawPayload: string, type: string): Promise<void>;
+  processCapture(captureId: string, userId: string, rawPayload: string, type: string, clientTimezone?: string): Promise<void>;
 }
 
 /**
@@ -162,10 +162,10 @@ export class GeminiAIProvider implements AIProvider {
     this.mockFallback = new MockAIProvider();
   }
 
-  async processCapture(captureId: string, userId: string, rawPayload: string, type: string): Promise<void> {
+  async processCapture(captureId: string, userId: string, rawPayload: string, type: string, clientTimezone?: string): Promise<void> {
     // In automated tests or simulated error tests, use deterministic mock
     if (process.env.NODE_ENV === "test" || rawPayload.includes("TEST_")) {
-      return this.mockFallback.processCapture(captureId, userId, rawPayload, type);
+      return this.mockFallback.processCapture(captureId, userId, rawPayload, type, clientTimezone);
     }
 
     console.log(`[Gemini AI] Processing capture ${captureId} with live LLM...`);
@@ -173,7 +173,7 @@ export class GeminiAIProvider implements AIProvider {
     const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
     const userSettings = (user?.settings as any) || {};
     const autoRemindersEnabled = userSettings.autoReminders === true;
-    const userTimezone = userSettings.timezone || "UTC";
+    const userTimezone = clientTimezone || userSettings.timezone || "UTC";
 
     const now = new Date();
     const todayStr = new Intl.DateTimeFormat("en-CA", { 
@@ -265,7 +265,7 @@ Return ONLY valid JSON adhering strictly to this schema:
  * Deterministic Mock AI Provider for offline development and automated CI suites.
  */
 export class MockAIProvider implements AIProvider {
-  async processCapture(captureId: string, userId: string, rawPayload: string, type: string): Promise<void> {
+  async processCapture(captureId: string, userId: string, rawPayload: string, type: string, clientTimezone?: string): Promise<void> {
     console.log(`[AI MOCK] Processing capture ${captureId}...`);
     
     // Simulate latency
