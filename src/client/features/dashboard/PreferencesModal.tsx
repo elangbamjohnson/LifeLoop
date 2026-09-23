@@ -10,7 +10,7 @@ interface PreferencesModalProps {
 export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
   const [autoReminders, setAutoReminders] = useState(false);
   const [channels, setChannels] = useState<string[]>(["web"]);
-  const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(false);
   const [quietHoursStart, setQuietHoursStart] = useState("22:00");
   const [quietHoursEnd, setQuietHoursEnd] = useState("08:00");
@@ -29,7 +29,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
         if (data?.preferences) {
           setAutoReminders(data.preferences.autoReminders ?? false);
           setChannels(data.preferences.channels || ["web"]);
-          setTimezone(data.preferences.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+
           setQuietHoursEnabled(data.preferences.quietHoursEnabled ?? false);
           setQuietHoursStart(data.preferences.quietHoursStart || "22:00");
           setQuietHoursEnd(data.preferences.quietHoursEnd || "08:00");
@@ -90,7 +90,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
         body: JSON.stringify({
           autoReminders,
           channels,
-          timezone,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           quietHoursEnabled,
           quietHoursStart,
           quietHoursEnd,
@@ -255,24 +255,6 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
                 </button>
               </div>
             )}
-          </div>
-
-          {/* Section C: Timezone & Locale */}
-          <div>
-            <label htmlFor="preferences-timezone-input" className="block text-xs font-semibold uppercase tracking-wider text-[#78716C] dark:text-[#A8A29E] mb-1.5 flex items-center gap-1.5">
-              <Globe className="w-3.5 h-3.5 text-amber-500" /> Timezone & Locale
-            </label>
-            <input
-              id="preferences-timezone-input"
-              aria-label="Timezone & Locale"
-              type="text"
-              value={timezone}
-              onChange={(e) => setTimezone(e.target.value)}
-              className="w-full px-3.5 py-2.5 min-h-[48px] rounded-xl border border-[#E7E5E4] dark:border-[#44403C] bg-white dark:bg-[#1C1917] text-base text-[#1C1917] dark:text-[#FDFBF7] focus:outline-none focus:ring-1 focus:ring-amber-500"
-            />
-            <p className="text-[11px] text-stone-600 dark:text-[#A8A29E] mt-1 leading-normal">
-              Ensures notifications arrive at the exact local hour across daylight-saving shifts.
-            </p>
           </div>
 
           {/* Section D: Quiet Hours (Start & End Time Picker with Switch Row) */}
