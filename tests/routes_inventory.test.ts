@@ -104,27 +104,34 @@ describe('Route Inventory & Input Validation Coverage', () => {
     // Must have found parameterised routes
     expect(routesWithIdParams.length).toBeGreaterThan(0);
 
-    // Verify every single route with an id param returns 400 when given 'not-a-uuid'
-    for (const route of routesWithIdParams) {
-      let targetUrl = route.fullPath;
-      for (const p of route.idParams) {
-        targetUrl = targetUrl.replace(`:${p}`, 'not-a-uuid');
-      }
-      targetUrl = targetUrl.replace(/:[a-zA-Z0-9_]+/g, 'dummy_token');
+    const server = app.listen(0);
+    const agent = request(server);
 
-      let reqCall: any;
-      if (route.method === 'GET') reqCall = request(app).get(targetUrl).set('Cookie', `session=${getValidToken()}`);
-      else if (route.method === 'POST') reqCall = request(app).post(targetUrl).set('Cookie', `session=${getValidToken()}`).send({});
-      else if (route.method === 'PATCH') reqCall = request(app).patch(targetUrl).set('Cookie', `session=${getValidToken()}`).send({});
-      else if (route.method === 'DELETE') reqCall = request(app).delete(targetUrl).set('Cookie', `session=${getValidToken()}`);
-      else continue;
+    try {
+      // Verify every single route with an id param returns 400 when given 'not-a-uuid'
+      for (const route of routesWithIdParams) {
+        let targetUrl = route.fullPath;
+        for (const p of route.idParams) {
+          targetUrl = targetUrl.replace(`:${p}`, 'not-a-uuid');
+        }
+        targetUrl = targetUrl.replace(/:[a-zA-Z0-9_]+/g, 'dummy_token');
 
-      const res = await reqCall;
-      if (res.status !== 400 || !String(res.body?.error || '').includes('Invalid identifier format')) {
-        console.error(`Route validation failed for: ${route.method} ${targetUrl}`, res.status, res.body, res.text, res.headers);
+        let reqCall: any;
+        if (route.method === 'GET') reqCall = agent.get(targetUrl).set('Cookie', `session=${getValidToken()}`);
+        else if (route.method === 'POST') reqCall = agent.post(targetUrl).set('Cookie', `session=${getValidToken()}`).send({});
+        else if (route.method === 'PATCH') reqCall = agent.patch(targetUrl).set('Cookie', `session=${getValidToken()}`).send({});
+        else if (route.method === 'DELETE') reqCall = agent.delete(targetUrl).set('Cookie', `session=${getValidToken()}`);
+        else continue;
+
+        const res = await reqCall;
+        if (res.status !== 400 || !String(res.body?.error || '').includes('Invalid identifier format')) {
+          console.error(`Route validation failed for: ${route.method} ${targetUrl}`, res.status, res.body, res.text, res.headers);
+        }
+        expect(res.status).toBe(400);
+        expect(String(res.body?.error || '')).toContain('Invalid identifier format');
       }
-      expect(res.status).toBe(400);
-      expect(String(res.body?.error || '')).toContain('Invalid identifier format');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 
