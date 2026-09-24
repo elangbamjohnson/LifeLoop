@@ -39,8 +39,8 @@ describe('Admin Access & Privileges (Vitest Integration)', () => {
 
   beforeAll(async () => {
     await db.insert(users).values([
-      { id: regularUserId, email: regularEmail, passwordHash: 'hashRegular', isAdmin: false },
-      { id: adminUserId, email: adminEmail, passwordHash: 'hashAdmin', isAdmin: true },
+      { id: regularUserId, email: regularEmail, passwordHash: 'hashRegular', isAdmin: false, accountStatus: 'active' },
+      { id: adminUserId, email: adminEmail, passwordHash: 'hashAdmin', isAdmin: true, accountStatus: 'active' },
     ]);
 
     regularCookie = `session=${jwt.sign({ userId: regularUserId }, JWT_SECRET)}`;
