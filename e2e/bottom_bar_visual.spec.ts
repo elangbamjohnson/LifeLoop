@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { verifyBackendReadiness } from './fixtures';
+import { verifyBackendReadiness, verifyUserEmail } from './fixtures';
 import fs from 'fs';
 import path from 'path';
 
@@ -28,6 +28,9 @@ test.describe('Visual: Phone Bottom Bar Opacity & Safe-Area', () => {
         if (m) sessionToken = m[1];
       }
     }
+
+    // Promote the test user to active so the dashboard renders (not the email-pending wall)
+    await verifyUserEmail(email);
 
     // Seed 15 items to ensure a long list that scrolls under the bottom bar
     for (let i = 1; i <= 15; i++) {
@@ -63,10 +66,10 @@ test.describe('Visual: Phone Bottom Bar Opacity & Safe-Area', () => {
       const bgColor = await bottomBar.evaluate((el) => {
         const style = window.getComputedStyle(el);
         return {
-          backgroundColor: style.backgroundColor,
-          borderTopColor: style.borderTopColor,
-          borderTopWidth: style.borderTopWidth,
-          paddingBottom: style.paddingBottom,
+          backgroundColor: style.getPropertyValue('background-color'),
+          borderTopColor: style.getPropertyValue('border-top-color'),
+          borderTopWidth: style.getPropertyValue('border-top-width'),
+          paddingBottom: style.getPropertyValue('padding-bottom'),
         };
       });
 

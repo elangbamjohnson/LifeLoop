@@ -256,3 +256,54 @@ test.describe('Accessibility Scans (@axe-core/playwright)', () => {
     expect(deleteFocused).toBe(true);
   });
 });
+
+test.describe('Accessibility Scans: Email Verification (@axe-core/playwright)', () => {
+  for (const vp of viewports) {
+    for (const theme of themes) {
+      test(`Axe scan email verification screens on ${vp.name} (${vp.width}x${vp.height}) in ${theme} mode`, async ({ page }) => {
+        await page.setViewportSize({ width: vp.width, height: vp.height });
+        
+        // 1. Registration Screen
+        await page.goto('/auth');
+        await page.waitForSelector('form', { state: 'visible' });
+        await setTheme(page, theme);
+        await page.getByText('Need an account? Register').click();
+        await page.waitForTimeout(200);
+        
+        let results = await new AxeBuilder({ page }).analyze();
+        let serious = results.violations.filter(v => v.impact === 'serious' || v.impact === 'critical');
+        expect(serious, `Registration screen has serious/critical violations: ${JSON.stringify(serious)}`).toEqual([]);
+
+        // 2. Pending Screen
+        // We'll trigger it by creating a dummy user and registering
+        await page.fill('input[type="email"]', `axe_test_${Date.now()}@test.com`);
+        await page.fill('input[type="password"]', 'Password123!');
+        await page.getByRole('button', { name: 'Create Account' }).click();
+        
+        await expect(page.getByText('Check your email')).toBeVisible();
+        await page.waitForTimeout(200);
+        results = await new AxeBuilder({ page }).analyze();
+        serious = results.violations.filter(v => v.impact === 'serious' || v.impact === 'critical');
+        expect(serious, `Pending screen has serious/critical violations: ${JSON.stringify(serious)}`).toEqual([]);
+
+        // 3. Change Email Screen
+        await page.getByRole('button', { name: 'Change email' }).click();
+        await expect(page.getByText('Change Email')).toBeVisible();
+        await page.waitForTimeout(200);
+        results = await new AxeBuilder({ page }).analyze();
+        serious = results.violations.filter(v => v.impact === 'serious' || v.impact === 'critical');
+        expect(serious, `Change Email screen has serious/critical violations: ${JSON.stringify(serious)}`).toEqual([]);
+
+        // 4. Verify Landing Page (Error State)
+        await page.goto('/verify-email?token=invalid');
+        await expect(page.getByText('Verification Failed')).toBeVisible();
+        await setTheme(page, theme);
+        await page.waitForTimeout(200);
+        results = await new AxeBuilder({ page }).analyze();
+        serious = results.violations.filter(v => v.impact === 'serious' || v.impact === 'critical');
+        expect(serious, `Verify Landing (Error) has serious/critical violations: ${JSON.stringify(serious)}`).toEqual([]);
+      });
+    }
+  }
+});
+

@@ -32,6 +32,29 @@ export async function promoteUserToAdmin(email: string) {
 }
 
 /**
+ * Manually verifies a test user's email strictly within the isolated test schema.
+ */
+export async function verifyUserEmail(email: string) {
+  const schemaName = process.env.TEST_SCHEMA || 'lifeloop_test_e2e';
+  const rawConnectionString = process.env.TEST_DATABASE_URL;
+  if (!rawConnectionString) {
+    throw new Error("FATAL: TEST_DATABASE_URL is required to verify test user.");
+  }
+  const base = rawConnectionString.replace("-pooler", "");
+  const connStr = base.includes("?")
+    ? `${base}&options=-c%20search_path%3D${schemaName}`
+    : `${base}?options=-c%20search_path%3D${schemaName}`;
+
+  const sql = postgres(connStr, { max: 1, onnotice: () => {} });
+  try {
+    await assertTestDatabaseLiveGuard(sql, schemaName);
+    await sql`UPDATE users SET account_status = 'active' WHERE email = ${email.toLowerCase()}`;
+  } finally {
+    await sql.end();
+  }
+}
+
+/**
  * Validates backend server and database availability with actionable error messages.
  */
 export async function verifyBackendReadiness(
@@ -123,6 +146,9 @@ export async function authenticateAndSeedSession(
   if (options.isAdmin) {
     await promoteUserToAdmin(testEmail);
   }
+
+  // Always verify the user email so they can access protected endpoints like POST /api/v1/items
+  await verifyUserEmail(testEmail);
 
   // 2. Extract session cookie and apply to browser context
   let sessionToken = '';

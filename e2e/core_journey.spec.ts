@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { verifyBackendReadiness, navigateToTab, promoteUserToAdmin } from './fixtures';
+import { verifyBackendReadiness, navigateToTab, promoteUserToAdmin, verifyUserEmail } from './fixtures';
 
 test.describe('LifeLoop End-to-End User Journeys', () => {
   const timestamp = Date.now();
@@ -34,6 +34,9 @@ test.describe('LifeLoop End-to-End User Journeys', () => {
     await page.fill('input[placeholder="you@example.com"]', userAEmail);
     await page.fill('input[placeholder="••••••••"]', password);
     await page.click('button:has-text("Create Account")');
+    await expect(page.locator('text="Check your email"')).toBeVisible();
+    await verifyUserEmail(userAEmail);
+    await page.goto("/");
 
     // Verify redirected to Dashboard
     await expect(page).toHaveURL('/');
@@ -100,6 +103,9 @@ test.describe('LifeLoop End-to-End User Journeys', () => {
     await page.fill('input[placeholder="you@example.com"]', userBEmail);
     await page.fill('input[placeholder="••••••••"]', password);
     await page.click('button:has-text("Create Account")');
+    await expect(page.locator('text="Check your email"')).toBeVisible();
+    await verifyUserEmail(userBEmail);
+    await page.goto("/");
 
     await expect(page).toHaveURL('/');
     // Promote User B to admin to test Ask boundary

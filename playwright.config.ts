@@ -60,6 +60,7 @@ export default defineConfig({
       NODE_ENV: 'test',
       LOG_LEVEL: 'warn',
       AI_PROVIDER: 'mock',
+      EMAIL_PROVIDER: 'mock',
       DISABLE_RATE_LIMIT: '1',
       TEST_SCHEMA: 'lifeloop_test_e2e',
       TEST_DATABASE_URL: process.env.TEST_DATABASE_URL!,

@@ -1,4 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+delete process.env.http_proxy;
+delete process.env.https_proxy;
+delete process.env.HTTP_PROXY;
+delete process.env.HTTPS_PROXY;
 import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
@@ -14,8 +18,22 @@ import { askRouter } from '../src/server/api/v1/ask';
 import { healthRouter } from '../src/server/api/health';
 import { errorHandler } from '../src/server/middlewares/errorHandler';
 import { UUID_PARAM_REGEX } from '../src/server/middlewares/validation';
+import { users } from '../src/db/schema';
+import { eq } from 'drizzle-orm';
 
 describe('Route Inventory & Input Validation Coverage', () => {
+  beforeAll(async () => {
+    await db.insert(users).values({
+      id: '00000000-0000-0000-0000-000000000001',
+      email: 'routes_inventory@example.com',
+      passwordHash: 'dummy',
+      accountStatus: 'active'
+    });
+  });
+
+  afterAll(async () => {
+    await db.delete(users).where(eq(users.id, '00000000-0000-0000-0000-000000000001'));
+  });
   const routers = [
     { name: 'itemsRouter', prefix: '/api/v1/items', router: itemsRouter },
     { name: 'familiesRouter', prefix: '/api/v1/families', router: familiesRouter },
@@ -86,24 +104,34 @@ describe('Route Inventory & Input Validation Coverage', () => {
     // Must have found parameterised routes
     expect(routesWithIdParams.length).toBeGreaterThan(0);
 
-    // Verify every single route with an id param returns 400 when given 'not-a-uuid'
-    for (const route of routesWithIdParams) {
-      let targetUrl = route.fullPath;
-      for (const p of route.idParams) {
-        targetUrl = targetUrl.replace(`:${p}`, 'not-a-uuid');
+    const server = app.listen(0);
+    const agent = request(server);
+
+    try {
+      // Verify every single route with an id param returns 400 when given 'not-a-uuid'
+      for (const route of routesWithIdParams) {
+        let targetUrl = route.fullPath;
+        for (const p of route.idParams) {
+          targetUrl = targetUrl.replace(`:${p}`, 'not-a-uuid');
+        }
+        targetUrl = targetUrl.replace(/:[a-zA-Z0-9_]+/g, 'dummy_token');
+
+        let reqCall: any;
+        if (route.method === 'GET') reqCall = agent.get(targetUrl).set('Cookie', `session=${getValidToken()}`);
+        else if (route.method === 'POST') reqCall = agent.post(targetUrl).set('Cookie', `session=${getValidToken()}`).send({});
+        else if (route.method === 'PATCH') reqCall = agent.patch(targetUrl).set('Cookie', `session=${getValidToken()}`).send({});
+        else if (route.method === 'DELETE') reqCall = agent.delete(targetUrl).set('Cookie', `session=${getValidToken()}`);
+        else continue;
+
+        const res = await reqCall;
+        if (res.status !== 400 || !String(res.body?.error || '').includes('Invalid identifier format')) {
+          console.error(`Route validation failed for: ${route.method} ${targetUrl}`, res.status, res.body, res.text, res.headers);
+        }
+        expect(res.status).toBe(400);
+        expect(String(res.body?.error || '')).toContain('Invalid identifier format');
       }
-      targetUrl = targetUrl.replace(/:[a-zA-Z0-9_]+/g, 'dummy_token');
-
-      let reqCall: any;
-      if (route.method === 'GET') reqCall = request(app).get(targetUrl).set('Cookie', `session=${getValidToken()}`);
-      else if (route.method === 'POST') reqCall = request(app).post(targetUrl).set('Cookie', `session=${getValidToken()}`).send({});
-      else if (route.method === 'PATCH') reqCall = request(app).patch(targetUrl).set('Cookie', `session=${getValidToken()}`).send({});
-      else if (route.method === 'DELETE') reqCall = request(app).delete(targetUrl).set('Cookie', `session=${getValidToken()}`);
-      else continue;
-
-      const res = await reqCall;
-      expect(res.status).toBe(400);
-      expect(String(res.body?.error || '')).toContain('Invalid identifier format');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 

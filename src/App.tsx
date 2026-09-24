@@ -7,6 +7,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-d
 import { AuthProvider, useAuth } from "./client/hooks/useAuth";
 import { ThemeProvider } from "./client/hooks/useTheme";
 import { AuthScreen } from "./client/features/auth/AuthScreen";
+import { VerifyEmailScreen } from "./client/features/auth/VerifyEmailScreen";
 import { Dashboard } from "./client/features/dashboard/Dashboard";
 
 import { AcceptInvitePage } from "./client/features/family/AcceptInvitePage";
@@ -35,6 +36,10 @@ function AppRoutes() {
       <Route
         path="/accept-invite"
         element={user ? <AcceptInvitePage /> : <Navigate to="/auth" replace />}
+      />
+      <Route
+        path="/verify-email"
+        element={<VerifyEmailScreen />}
       />
     </Routes>
   );

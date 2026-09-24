@@ -3,9 +3,11 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
 import { db } from "../../../db";
-import { users } from "../../../db/schema";
-import { eq } from "drizzle-orm";
+import { users, emailVerificationTokens } from "../../../db/schema";
+import { eq, and, isNull } from "drizzle-orm";
 import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
+import crypto from "crypto";
+import { getEmailProvider } from "../../services/EmailProvider";
 
 export const authRouter = Router();
 
@@ -15,11 +17,33 @@ if (!JWT_SECRET) {
 }
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,
-  skip: () => process.env.DISABLE_RATE_LIMIT === "1",
-  message: { error: "Too many login attempts, please try again later" },
+  max: 20, // 20 attempts per 15 min per IP — blocks brute-force while tolerating honest typos
+  message: { error: "Too many requests, please try again later" },
+  skip: (req) => process.env.NODE_ENV !== 'production' && process.env.DISABLE_RATE_LIMIT === "1" && req.headers['x-force-rate-limit'] !== "1",
   validate: { xForwardedForHeader: false, default: true }
 });
+
+const resendLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10, // 10 per IP
+  skip: (req) => process.env.NODE_ENV !== 'production' && process.env.DISABLE_RATE_LIMIT === "1" && req.headers['x-force-rate-limit'] !== "1",
+  message: { error: "Too many resend attempts, please try again later" },
+  validate: { xForwardedForHeader: false, default: true }
+});
+
+const resendAccountLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 3, // 3 per email per hour
+  skip: (req) => process.env.NODE_ENV !== 'production' && process.env.DISABLE_RATE_LIMIT === "1" && req.headers['x-force-rate-limit'] !== "1",
+  message: { error: "Too many resend attempts, please try again later" },
+  validate: { xForwardedForHeader: false, default: true }
+});
+
+function generateToken() {
+  const tokenRaw = crypto.randomBytes(32).toString('base64url');
+  const tokenHash = crypto.createHash('sha256').update(tokenRaw).digest('hex');
+  return { tokenRaw, tokenHash };
+}
 
 // Register
 authRouter.post("/register", authLimiter, async (req, res, next) => {
@@ -46,22 +70,49 @@ authRouter.post("/register", authLimiter, async (req, res, next) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const [user] = await db
-      .insert(users)
-      .values({ email: normalizedEmail, passwordHash })
-      .returning({ id: users.id, email: users.email, isAdmin: users.isAdmin });
+    const { tokenRaw, tokenHash } = generateToken();
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
-    
-    const isSecure = process.env.NODE_ENV === "production" || req.secure || req.headers["x-forwarded-proto"] === "https";
-    res.cookie("session", token, {
-      httpOnly: true,
-      secure: isSecure, // Required for sameSite: "none", false for localhost HTTP
-      sameSite: isSecure ? "none" : "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    let user;
+    await db.transaction(async (tx) => {
+      [user] = await tx
+        .insert(users)
+        .values({ email: normalizedEmail, passwordHash, accountStatus: 'pending_verification' })
+        .returning({ id: users.id, email: users.email, isAdmin: users.isAdmin, accountStatus: users.accountStatus });
+
+      await tx.insert(emailVerificationTokens).values({
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+      });
     });
 
-    res.status(201).json({ user: { id: user.id, email: user.email, isAdmin: Boolean(user.isAdmin) } });
+    const verifyUrl = `${req.protocol}://${req.get("host")}/verify-email?token=${tokenRaw}`;
+    
+    // Async send email
+    getEmailProvider().sendVerificationEmail({
+      to: normalizedEmail,
+      verifyUrl,
+      expiresAt,
+    }).catch(() => {});
+
+    // Issue session cookie for pending user
+    // Issue session cookie for pending user
+    const sessionToken = jwt.sign(
+      { userId: user.id },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    const isSecure = process.env.NODE_ENV === "production" || req.secure || (req.headers["x-forwarded-proto"] === "https");
+    res.cookie("session", sessionToken, {
+      httpOnly: true,
+      secure: isSecure,
+      sameSite: isSecure ? "none" : "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    res.status(201).json({ user: { id: user!.id, email: user!.email, isAdmin: Boolean(user!.isAdmin), accountStatus: user!.accountStatus } });
   } catch (error) {
     next(error);
   }
@@ -89,6 +140,10 @@ authRouter.post("/login", authLimiter, async (req, res, next) => {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
+    if (user.accountStatus === 'pending_verification') {
+      return res.status(401).json({ error: "Please verify your email address to log in" });
+    }
+
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
     
     const isSecure = process.env.NODE_ENV === "production" || req.secure || req.headers["x-forwarded-proto"] === "https";
@@ -99,8 +154,188 @@ authRouter.post("/login", authLimiter, async (req, res, next) => {
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    res.json({ user: { id: user.id, email: user.email, isAdmin: Boolean(user.isAdmin) } });
+    res.json({ user: { id: user.id, email: user.email, isAdmin: Boolean(user.isAdmin), accountStatus: user.accountStatus } });
   } catch (error) {
+    next(error);
+  }
+});
+
+// Verify Email
+authRouter.get("/verify-email", async (req, res, next) => {
+  try {
+    const { token } = req.query;
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ error: "Invalid or missing token" });
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+    const result = await db.transaction(async (tx) => {
+      const [tokenRecord] = await tx
+        .select()
+        .from(emailVerificationTokens)
+        .where(eq(emailVerificationTokens.tokenHash, tokenHash))
+        .limit(1);
+
+      if (!tokenRecord) {
+        return { error: "Invalid or expired token" };
+      }
+
+      if (tokenRecord.expiresAt < new Date()) {
+        return { error: "Invalid or expired token" };
+      }
+
+      const now = new Date();
+      if (tokenRecord.usedAt) {
+        // Idempotent grace window of 5 minutes
+        if (now.getTime() - tokenRecord.usedAt.getTime() <= 5 * 60 * 1000) {
+          return { success: true };
+        }
+        return { error: "Invalid or expired token" };
+      }
+
+      const [user] = await tx.select().from(users).where(eq(users.id, tokenRecord.userId)).limit(1);
+      if (!user) {
+        return { error: "Invalid or expired token" };
+      }
+
+      // Conditional update for concurrent double-submit
+      const [updatedToken] = await tx
+        .update(emailVerificationTokens)
+        .set({ usedAt: now })
+        .where(and(eq(emailVerificationTokens.id, tokenRecord.id), isNull(emailVerificationTokens.usedAt)))
+        .returning({ id: emailVerificationTokens.id });
+
+      if (!updatedToken) {
+        // We lost the race to another concurrent request. 
+        // Since it happened right now, it is guaranteed to be within the 5-minute grace window.
+        return { success: true, userId: user.id };
+      }
+
+      await tx
+        .update(users)
+        .set({ accountStatus: 'active', emailVerifiedAt: now })
+        .where(eq(users.id, user.id));
+
+      await tx
+        .update(emailVerificationTokens)
+        .set({ usedAt: now })
+        .where(and(eq(emailVerificationTokens.userId, user.id), isNull(emailVerificationTokens.usedAt)));
+
+      return { success: true, userId: user.id };
+    });
+
+    if (result.error) {
+      return res.status(400).json({ error: result.error });
+    }
+
+    res.json({ success: true, message: "Email successfully verified. You may now log in." });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Resend Verification
+authRouter.post("/resend-verification", resendLimiter, resendAccountLimiter, async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    if (!email || typeof email !== "string") {
+      return res.status(400).json({ error: "Email required" });
+    }
+    const normalizedEmail = email.trim().toLowerCase();
+    
+    const [user] = await db.select().from(users).where(eq(users.email, normalizedEmail)).limit(1);
+
+    if (user && user.accountStatus === 'pending_verification') {
+      const { tokenRaw, tokenHash } = generateToken();
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      await db.transaction(async (tx) => {
+        await tx
+          .delete(emailVerificationTokens)
+          .where(and(eq(emailVerificationTokens.userId, user.id), isNull(emailVerificationTokens.usedAt)));
+
+        await tx.insert(emailVerificationTokens).values({
+          userId: user.id,
+          tokenHash,
+          expiresAt,
+        });
+      });
+
+      const verifyUrl = `${req.protocol}://${req.get("host")}/verify-email?token=${tokenRaw}`;
+      getEmailProvider().sendVerificationEmail({
+        to: normalizedEmail,
+        verifyUrl,
+        expiresAt,
+      }).catch(err => {
+        req.log.error({ err, email: normalizedEmail }, "Failed to send verification email");
+      });
+    }
+
+    res.json({ message: "If an account requires email verification, a verification email has been sent." });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Change Email
+authRouter.post("/change-email", authLimiter, async (req, res, next) => {
+  try {
+    const { currentEmail, newEmail } = req.body;
+    if (!currentEmail || typeof currentEmail !== "string" || !newEmail || typeof newEmail !== "string") {
+      return res.status(400).json({ error: "Both current and new email are required" });
+    }
+    
+    const normalizedCurrentEmail = currentEmail.trim().toLowerCase();
+    const normalizedNewEmail = newEmail.trim().toLowerCase();
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(normalizedNewEmail)) {
+      return res.status(400).json({ error: "Invalid new email format" });
+    }
+
+    await db.transaction(async (tx) => {
+      const [user] = await tx.select().from(users).where(eq(users.email, normalizedCurrentEmail)).limit(1);
+      
+      if (!user || user.accountStatus !== 'pending_verification') {
+        throw new Error("Invalid request");
+      }
+
+      const [existingNew] = await tx.select().from(users).where(eq(users.email, normalizedNewEmail)).limit(1);
+      if (existingNew) {
+        throw new Error("Email already in use");
+      }
+
+      const { tokenRaw, tokenHash } = generateToken();
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      await tx.update(users).set({ email: normalizedNewEmail }).where(eq(users.id, user.id));
+
+      await tx
+        .delete(emailVerificationTokens)
+        .where(and(eq(emailVerificationTokens.userId, user.id), isNull(emailVerificationTokens.usedAt)));
+
+      await tx.insert(emailVerificationTokens).values({
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+      });
+
+      const verifyUrl = `${req.protocol}://${req.get("host")}/verify-email?token=${tokenRaw}`;
+      getEmailProvider().sendVerificationEmail({
+        to: normalizedNewEmail,
+        verifyUrl,
+        expiresAt,
+      }).catch(err => {
+        req.log.error({ err, email: normalizedNewEmail }, "Failed to send change-email verification email");
+      });
+    });
+
+    res.json({ success: true, message: "Email changed and verification resent." });
+  } catch (error: any) {
+    if (error.message === "Email already in use" || error.message === "Invalid request") {
+      return res.status(400).json({ error: error.message });
+    }
     next(error);
   }
 });
@@ -120,7 +355,7 @@ authRouter.post("/logout", (req, res) => {
 authRouter.get("/me", requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
     const [user] = await db
-      .select({ id: users.id, email: users.email, isAdmin: users.isAdmin })
+      .select({ id: users.id, email: users.email, isAdmin: users.isAdmin, accountStatus: users.accountStatus })
       .from(users)
       .where(eq(users.id, req.userId!))
       .limit(1);
@@ -133,7 +368,12 @@ authRouter.get("/me", requireAuth, async (req: AuthenticatedRequest, res, next) 
       });
       return res.status(401).json({ error: "User not found" });
     }
-    res.json({ user: { id: user.id, email: user.email, isAdmin: Boolean(user.isAdmin) } });
+    
+    if (user.accountStatus === 'pending_verification') {
+      return res.json({ user: { id: user.id, email: user.email, accountStatus: user.accountStatus } });
+    }
+    
+    res.json({ user: { id: user.id, email: user.email, isAdmin: Boolean(user.isAdmin), accountStatus: user.accountStatus } });
   } catch (error) {
     next(error);
   }

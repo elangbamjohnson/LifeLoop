@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { verifyBackendReadiness } from './fixtures';
+import { verifyBackendReadiness, verifyUserEmail } from './fixtures';
 
 test.describe('Live Sync via Server-Sent Events (Cross-Device)', () => {
   const timestamp = Date.now();
@@ -18,6 +18,7 @@ test.describe('Live Sync via Server-Sent Events (Cross-Device)', () => {
       data: { email: userAEmail, password },
     });
     expect(regResA.ok()).toBe(true);
+    await verifyUserEmail(userAEmail);
     for (const h of regResA.headersArray()) {
       if (h.name.toLowerCase() === 'set-cookie') {
         const m = h.value.match(/session=([^;]+)/);
@@ -30,6 +31,7 @@ test.describe('Live Sync via Server-Sent Events (Cross-Device)', () => {
       data: { email: userCEmail, password },
     });
     expect(regResC.ok()).toBe(true);
+    await verifyUserEmail(userCEmail);
     for (const h of regResC.headersArray()) {
       if (h.name.toLowerCase() === 'set-cookie') {
         const m = h.value.match(/session=([^;]+)/);
