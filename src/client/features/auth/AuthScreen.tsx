@@ -41,7 +41,11 @@ export function AuthScreen() {
       const res = await fetch(`/api/v1/auth/${isLogin ? "login" : "register"}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ 
+          email, 
+          password,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        }),
       });
 
       const data = await res.json();
