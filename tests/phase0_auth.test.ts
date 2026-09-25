@@ -17,6 +17,8 @@ const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_development_on
 describe('Phase 0: Authentication, Session Management & Authorization (P0/P1)', () => {
   const testUserAEmail = `autha_${uuidv4()}@example.com`;
   const testUserBEmail = `authb_${uuidv4()}@example.com`;
+  const testGoogleEmail = `auth_google_${uuidv4()}@example.com`;
+  const testGoogleSub = `sub_${uuidv4()}`;
   const validPassword = 'SecurePassword123!';
   let userAId: string;
   let userBId: string;
@@ -29,7 +31,7 @@ describe('Phase 0: Authentication, Session Management & Authorization (P0/P1)', 
     if (userAPrivateItemId) {
       await db.delete(items).where(eq(items.id, userAPrivateItemId));
     }
-    await db.delete(users).where(inArray(users.email, [testUserAEmail, testUserBEmail]));
+    await db.delete(users).where(inArray(users.email, [testUserAEmail, testUserBEmail, testGoogleEmail]));
   });
 
   // 1. Registration
@@ -241,4 +243,98 @@ describe('Phase 0: Authentication, Session Management & Authorization (P0/P1)', 
       .set('Cookie', cookieB);
     expect(idorDelete.status).toBe(404);
   });
+
+  // 6. Hybrid Google OAuth Authentication
+  describe('Hybrid Google OAuth & Account Linking', () => {
+    it('should expose public auth config with googleClientId', async () => {
+      const res = await request(app).get('/api/v1/auth/config');
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('googleClientId');
+    });
+
+    it('should reject Google login without credential', async () => {
+      const res = await request(app).post('/api/v1/auth/google').send({});
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Google credential is required');
+    });
+
+    it('should register a new active user via Google OAuth without password requirement', async () => {
+      const mockToken = `mock_google_token:${testGoogleEmail}:${testGoogleSub}`;
+      const res = await request(app)
+        .post('/api/v1/auth/google')
+        .send({ credential: mockToken, timezone: 'America/New_York' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.user).toBeDefined();
+      expect(res.body.user.email).toBe(testGoogleEmail.toLowerCase());
+      expect(res.body.user.accountStatus).toBe('active');
+      expect(res.body.user.authProvider).toBe('google');
+
+      // Verify HttpOnly session cookie is issued
+      const cookies = Array.isArray(res.headers['set-cookie']) ? res.headers['set-cookie'] : [res.headers['set-cookie'] as string];
+      expect(cookies).toBeDefined();
+      const sessionCookie = cookies.find((c: string) => c && c.startsWith('session='));
+      expect(sessionCookie).toBeDefined();
+      expect(sessionCookie).toContain('HttpOnly');
+
+      // Verify DB record has no password_hash
+      const [dbUser] = await db.select().from(users).where(eq(users.email, testGoogleEmail.toLowerCase())).limit(1);
+      expect(dbUser).toBeDefined();
+      expect(dbUser.passwordHash).toBeNull();
+      expect(dbUser.googleId).toBe(testGoogleSub);
+      expect(dbUser.authProvider).toBe('google');
+    });
+
+    it('should log in an existing Google user and return active session', async () => {
+      const mockToken = `mock_google_token:${testGoogleEmail}:${testGoogleSub}`;
+      const res = await request(app)
+        .post('/api/v1/auth/google')
+        .send({ credential: mockToken });
+
+      expect(res.status).toBe(200);
+      expect(res.body.user.email).toBe(testGoogleEmail.toLowerCase());
+      expect(res.body.user.accountStatus).toBe('active');
+
+      const cookies = Array.isArray(res.headers['set-cookie']) ? res.headers['set-cookie'] : [res.headers['set-cookie'] as string];
+      const sessionCookie = cookies.find((c: string) => c && c.startsWith('session='));
+      expect(sessionCookie).toBeDefined();
+    });
+
+    it('should reject traditional password login for a user registered exclusively via Google', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/login')
+        .send({ email: testGoogleEmail, password: 'AnyPassword123!' });
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toContain('registered with Google');
+    });
+
+    it('should seamlessly link an existing email/password account to Google OAuth', async () => {
+      // User A was originally created via traditional email/password
+      const userALinkSub = `gsub_link_${uuidv4()}`;
+      const mockToken = `mock_google_token:${testUserAEmail}:${userALinkSub}`;
+
+      const res = await request(app)
+        .post('/api/v1/auth/google')
+        .send({ credential: mockToken });
+
+      expect(res.status).toBe(200);
+      expect(res.body.user.email).toBe(testUserAEmail.toLowerCase());
+      expect(res.body.user.accountStatus).toBe('active');
+      expect(res.body.user.authProvider).toBe('hybrid');
+
+      // Verify DB state
+      const [updatedUser] = await db.select().from(users).where(eq(users.email, testUserAEmail.toLowerCase())).limit(1);
+      expect(updatedUser.googleId).toBe(userALinkSub);
+      expect(updatedUser.authProvider).toBe('hybrid');
+      expect(updatedUser.passwordHash).not.toBeNull(); // Still preserves password for hybrid sign-in!
+
+      // User A can still log in with their password
+      const passLogin = await request(app)
+        .post('/api/v1/auth/login')
+        .send({ email: testUserAEmail, password: validPassword });
+      expect(passLogin.status).toBe(200);
+    });
+  });
 });
+

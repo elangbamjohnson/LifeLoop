@@ -11,7 +11,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "check": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u ALL_PROXY -u all_proxy vitest run",
     "db:migrate:dev": "tsx scripts/migrateDevDb.ts"
   },
   "dependencies": {
@@ -26,6 +26,7 @@
     "esbuild": "^0.25.0",
     "express": "^4.21.2",
     "express-rate-limit": "^8.7.0",
+    "google-auth-library": "^11.1.0",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",

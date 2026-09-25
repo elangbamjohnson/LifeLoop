@@ -8,13 +8,23 @@ import { eq, and, isNull } from "drizzle-orm";
 import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
 import crypto from "crypto";
 import { getEmailProvider } from "../../services/EmailProvider";
+import { OAuth2Client } from "google-auth-library";
 
 export const authRouter = Router();
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
   throw new Error("FATAL: JWT_SECRET environment variable is missing");
 }
+
+// Public auth configuration for client discovery
+authRouter.get("/config", (_req, res) => {
+  res.json({
+    googleClientId: process.env.GOOGLE_CLIENT_ID || null,
+  });
+});
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 20, // 20 attempts per 15 min per IP — blocks brute-force while tolerating honest typos
@@ -123,6 +133,118 @@ authRouter.post("/register", authLimiter, async (req, res, next) => {
   }
 });
 
+// Google OAuth Login & Registration
+authRouter.post("/google", authLimiter, async (req, res, next) => {
+  try {
+    const { credential, timezone } = req.body;
+
+    if (!credential || typeof credential !== "string") {
+      return res.status(400).json({ error: "Google credential is required" });
+    }
+
+    let payload: { email?: string; email_verified?: boolean; sub: string; name?: string };
+
+    // Deterministic mock token for automated unit/E2E test suites: "mock_google_token:<email>:<sub_id>"
+    if (process.env.NODE_ENV === "test" && credential.startsWith("mock_google_token:")) {
+      const parts = credential.split(":");
+      payload = {
+        email: parts[1] || "google_user@example.com",
+        email_verified: true,
+        sub: parts[2] || `google_sub_${Date.now()}`,
+      };
+    } else {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      const googlePayload = ticket.getPayload();
+      if (!googlePayload || !googlePayload.email) {
+        return res.status(400).json({ error: "Invalid Google token payload" });
+      }
+      if (!googlePayload.email_verified) {
+        return res.status(400).json({ error: "Google email is not verified" });
+      }
+      payload = {
+        email: googlePayload.email,
+        email_verified: googlePayload.email_verified,
+        sub: googlePayload.sub,
+        name: googlePayload.name,
+      };
+    }
+
+    const normalizedEmail = payload.email!.trim().toLowerCase();
+    const googleId = payload.sub;
+
+    // 1. Check if user already exists by googleId
+    let [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.googleId, googleId))
+      .limit(1);
+
+    if (!user) {
+      // 2. Check if user exists by email (link Google OAuth to existing email account)
+      const [existingByEmail] = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, normalizedEmail))
+        .limit(1);
+
+      if (existingByEmail) {
+        const [updatedUser] = await db
+          .update(users)
+          .set({
+            googleId,
+            authProvider: existingByEmail.authProvider === "local" ? "hybrid" : existingByEmail.authProvider,
+            accountStatus: "active",
+            emailVerifiedAt: existingByEmail.emailVerifiedAt || new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(users.id, existingByEmail.id))
+          .returning();
+        user = updatedUser;
+      } else {
+        // 3. Create brand-new verified user
+        const [newUser] = await db
+          .insert(users)
+          .values({
+            email: normalizedEmail,
+            passwordHash: null,
+            googleId,
+            authProvider: "google",
+            accountStatus: "active",
+            emailVerifiedAt: new Date(),
+            settings: { timezone: timezone || "UTC" },
+          })
+          .returning();
+        user = newUser;
+      }
+    }
+
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
+    const isSecure = process.env.NODE_ENV === "production" || req.secure || (req.headers["x-forwarded-proto"] === "https");
+
+    res.cookie("session", token, {
+      httpOnly: true,
+      secure: isSecure,
+      sameSite: isSecure ? "none" : "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        isAdmin: Boolean(user.isAdmin),
+        accountStatus: user.accountStatus,
+        authProvider: user.authProvider,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Login
 authRouter.post("/login", authLimiter, async (req, res, next) => {
   try {
@@ -138,6 +260,10 @@ authRouter.post("/login", authLimiter, async (req, res, next) => {
     
     if (!user) {
       return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    if (!user.passwordHash) {
+      return res.status(401).json({ error: "This account was registered with Google. Please sign in with Google." });
     }
 
     const isValid = await bcrypt.compare(password, user.passwordHash);

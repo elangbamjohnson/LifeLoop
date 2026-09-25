@@ -15,7 +15,9 @@ import {
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: varchar("email", { length: 255 }).notNull().unique(),
-  passwordHash: text("password_hash").notNull(),
+  passwordHash: text("password_hash"), // Nullable for Google OAuth users
+  googleId: text("google_id").unique(),
+  authProvider: varchar("auth_provider", { length: 50 }).default("local").notNull(), // 'local' | 'google'
   isAdmin: boolean("is_admin").notNull().default(false),
   settings: jsonb("settings").default({}),
   emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
