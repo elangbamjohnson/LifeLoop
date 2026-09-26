@@ -13,16 +13,7 @@ import cookieParser from 'cookie-parser';
 
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_development_only";
 
-function createCombinedApp() {
-  const app = express();
-  app.use(express.json());
-  app.use(cookieParser());
-  app.use('/api/v1/auth', authRouter);
-  app.use('/api/v1/ask', askRouter);
-  return app;
-}
-
-const app = createCombinedApp();
+const app = createTestApp();
 
 describe('Admin Access & Privileges (Vitest Integration)', () => {
   const regularUserId = uuidv4();

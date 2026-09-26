@@ -5,8 +5,29 @@ delete process.env.HTTP_PROXY;
 delete process.env.HTTPS_PROXY;
 delete process.env.http_proxy;
 delete process.env.https_proxy;
+delete process.env.ALL_PROXY;
+delete process.env.all_proxy;
+delete process.env.npm_config_proxy;
+delete process.env.npm_config_http_proxy;
+delete process.env.npm_config_https_proxy;
 process.env.NO_PROXY = "*";
 process.env.no_proxy = "*";
+
+import http from "http";
+import https from "https";
+for (const agent of [http.globalAgent, https.globalAgent]) {
+  if (agent) {
+    if ((agent as any).options) {
+      (agent as any).options.proxyEnv = undefined;
+    }
+    for (const sym of Object.getOwnPropertySymbols(agent)) {
+      if (sym.toString().includes("Proxy")) {
+        (agent as any)[sym] = null;
+      }
+    }
+  }
+}
+
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-key-for-tests-only';
 
 import { inject, beforeAll } from 'vitest';

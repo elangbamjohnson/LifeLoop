@@ -26,7 +26,9 @@ export async function applySchema(sql: postgres.Sql, targetSchema: string): Prom
     CREATE TABLE IF NOT EXISTS ${targetSchema}.users (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       email VARCHAR(255) NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
+      password_hash TEXT,
+      google_id TEXT,
+      auth_provider VARCHAR(50) NOT NULL DEFAULT 'local',
       is_admin BOOLEAN NOT NULL DEFAULT false,
       settings JSONB DEFAULT '{}'::jsonb,
       email_verified_at TIMESTAMP WITH TIME ZONE,
@@ -34,6 +36,10 @@ export async function applySchema(sql: postgres.Sql, targetSchema: string): Prom
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE ${targetSchema}.users ALTER COLUMN password_hash DROP NOT NULL;
+    ALTER TABLE ${targetSchema}.users ADD COLUMN IF NOT EXISTS google_id TEXT;
+    ALTER TABLE ${targetSchema}.users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(50) NOT NULL DEFAULT 'local';
+    CREATE UNIQUE INDEX IF NOT EXISTS users_google_id_idx ON ${targetSchema}.users(google_id);
     ALTER TABLE ${targetSchema}.users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE ${targetSchema}.users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP WITH TIME ZONE;
     ALTER TABLE ${targetSchema}.users ADD COLUMN IF NOT EXISTS account_status VARCHAR(50) NOT NULL DEFAULT 'pending_verification';
