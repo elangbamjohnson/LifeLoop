@@ -191,6 +191,10 @@ authRouter.post("/google", authLimiter, async (req, res, next) => {
         .limit(1);
 
       if (existingByEmail) {
+        // If the existing row was never email-verified (pending_verification) we null out
+        // the password_hash in the same UPDATE so the unverified hash cannot be replayed
+        // via /login after this account is promoted to active via Google sign-in.
+        const wasUnverified = existingByEmail.accountStatus === "pending_verification";
         const [updatedUser] = await db
           .update(users)
           .set({
@@ -198,6 +202,10 @@ authRouter.post("/google", authLimiter, async (req, res, next) => {
             authProvider: existingByEmail.authProvider === "local" ? "hybrid" : existingByEmail.authProvider,
             accountStatus: "active",
             emailVerifiedAt: existingByEmail.emailVerifiedAt || new Date(),
+            // Null out password_hash for previously-unverified accounts so the /login
+            // guard correctly blocks password auth (the user never proved they owned
+            // that address — Google has now verified it instead).
+            ...(wasUnverified ? { passwordHash: null } : {}),
             updatedAt: new Date(),
           })
           .where(eq(users.id, existingByEmail.id))

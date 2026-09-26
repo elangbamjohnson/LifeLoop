@@ -335,6 +335,48 @@ describe('Phase 0: Authentication, Session Management & Authorization (P0/P1)', 
         .send({ email: testUserAEmail, password: validPassword });
       expect(passLogin.status).toBe(200);
     });
+
+    it('should null out password_hash when linking Google to a pending_verification account, making the original password invalid', async () => {
+      // 1. Register a brand-new account — do NOT verify the email
+      const pendingEmail = `pending_google_${uuidv4()}@example.com`;
+      const pendingPassword = 'PendingPass999!';
+      const pendingSub = `gsub_pending_${uuidv4()}`;
+
+      const regRes = await request(app)
+        .post('/api/v1/auth/register')
+        .send({ email: pendingEmail, password: pendingPassword });
+      expect(regRes.status).toBe(201);
+      const pendingUserId = regRes.body.user.id;
+
+      // Verify the user is still pending (no manual activation)
+      const [beforeLink] = await db.select().from(users).where(eq(users.id, pendingUserId)).limit(1);
+      expect(beforeLink.accountStatus).toBe('pending_verification');
+      expect(beforeLink.passwordHash).not.toBeNull(); // hash exists before linking
+
+      // 2. Link via Google — simulates user clicking "Sign in with Google" with the same email
+      const mockToken = `mock_google_token:${pendingEmail}:${pendingSub}`;
+      const linkRes = await request(app)
+        .post('/api/v1/auth/google')
+        .send({ credential: mockToken });
+      expect(linkRes.status).toBe(200);
+      expect(linkRes.body.user.accountStatus).toBe('active');
+      expect(linkRes.body.user.authProvider).toBe('hybrid');
+
+      // 3. Confirm password_hash was nulled out in DB during the same UPDATE
+      const [afterLink] = await db.select().from(users).where(eq(users.id, pendingUserId)).limit(1);
+      expect(afterLink.passwordHash).toBeNull(); // <-- the gap fix
+      expect(afterLink.googleId).toBe(pendingSub);
+
+      // 4. Confirm original password no longer authenticates
+      const passLoginRes = await request(app)
+        .post('/api/v1/auth/login')
+        .send({ email: pendingEmail, password: pendingPassword });
+      expect(passLoginRes.status).toBe(401);
+      expect(passLoginRes.body.error).toContain('registered with Google');
+
+      // Cleanup extra user
+      await db.delete(users).where(eq(users.id, pendingUserId));
+    });
   });
 });
 
