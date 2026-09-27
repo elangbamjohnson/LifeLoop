@@ -19,7 +19,57 @@ export interface CreateReminderParams {
   targetMinute?: number; // default 0
 }
 
+/**
+ * Evaluates whether a given instant falls inside a user's quiet hours in their local timezone.
+ * Handles both standard daytime/evening windows and windows spanning midnight (e.g. 22:00 to 07:00).
+ */
+export function isTimeInQuietHours(
+  date: Date,
+  quietHoursStart: string = "22:00",
+  quietHoursEnd: string = "08:00",
+  timezone: string = "UTC"
+): boolean {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "numeric",
+      minute: "numeric",
+      hour12: false,
+    });
+
+    const parts = formatter.formatToParts(date);
+    const hourPart = parts.find((p) => p.type === "hour")?.value ?? "0";
+    const minutePart = parts.find((p) => p.type === "minute")?.value ?? "0";
+
+    const currentHour = parseInt(hourPart, 10) % 24;
+    const currentMinute = parseInt(minutePart, 10);
+    const currentMinutes = currentHour * 60 + currentMinute;
+
+    const [startH, startM] = quietHoursStart.split(":").map((v) => parseInt(v, 10) || 0);
+    const [endH, endM] = quietHoursEnd.split(":").map((v) => parseInt(v, 10) || 0);
+
+    const startMinutes = (startH % 24) * 60 + startM;
+    const endMinutes = (endH % 24) * 60 + endM;
+
+    if (startMinutes === endMinutes) {
+      return false;
+    }
+
+    if (startMinutes < endMinutes) {
+      // Normal range within same day (e.g. 13:00 to 17:00)
+      return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+    } else {
+      // Range spanning midnight (e.g. 22:00 to 07:00)
+      return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+    }
+  } catch (err) {
+    console.error(`[isTimeInQuietHours] Error checking quiet hours for timezone ${timezone}:`, err);
+    return false;
+  }
+}
+
 export class ReminderService {
+  private schedulerInterval: NodeJS.Timeout | null = null;
   /**
    * Safely calculates a scheduled date accounting for day offset and timezone / DST.
    * Uses wall-clock calculation in user's timezone so that a 9:00 AM reminder stays 9:00 AM
@@ -349,21 +399,84 @@ export class ReminderService {
 
   /**
    * Dispatches due reminders across all configured channels.
+   * Concurrency-safe: atomically claims eligible rows to 'dispatching' in the DB so concurrent workers never double-send.
+   * Crash-resilient: reclaims reminders stuck in 'dispatching' past stuckTimeoutMs.
+   * Quiet-hours aware: respects user's quiet hours in their local timezone; holds reminders until quiet hours end.
    */
-  async dispatchDueReminders(now: Date = new Date()) {
-    const dueReminders = await db
-      .select()
-      .from(reminders)
+  async dispatchDueReminders(
+    now: Date = new Date(),
+    stuckTimeoutMs: number = 5 * 60 * 1000
+  ) {
+    const stuckThreshold = new Date(now.getTime() - stuckTimeoutMs);
+
+    // 1. Concurrency-safe atomic DB claim step
+    // Matches reminders that are:
+    // - due ('scheduled' or 'snoozed' with scheduledAt <= now)
+    // - OR stuck in 'dispatching' state older than stuckThreshold (crash recovery)
+    const claimedReminders = await db
+      .update(reminders)
+      .set({
+        status: "dispatching",
+        updatedAt: now,
+      })
       .where(
-        and(
-          or(eq(reminders.status, "scheduled"), eq(reminders.status, "snoozed")),
-          lte(reminders.scheduledAt, now)
+        or(
+          and(
+            or(eq(reminders.status, "scheduled"), eq(reminders.status, "snoozed")),
+            lte(reminders.scheduledAt, now)
+          ),
+          and(
+            eq(reminders.status, "dispatching"),
+            lte(reminders.updatedAt, stuckThreshold)
+          )
         )
-      );
+      )
+      .returning();
+
+    if (claimedReminders.length === 0) {
+      return [];
+    }
 
     const results = [];
-    for (const reminder of dueReminders) {
+    for (const reminder of claimedReminders) {
       try {
+        // 2. Fetch user settings for quiet hours and timezone check
+        const [user] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, reminder.userId))
+          .limit(1);
+
+        const settings = (user?.settings as any) || {};
+        const quietHoursEnabled = settings.quietHoursEnabled === true;
+        const quietHoursStart = settings.quietHoursStart || "22:00";
+        const quietHoursEnd = settings.quietHoursEnd || "08:00";
+        const userTimezone = settings.timezone || "UTC";
+
+        // 3. Quiet hours check: hold reminder if currently within quiet hours
+        if (quietHoursEnabled && isTimeInQuietHours(now, quietHoursStart, quietHoursEnd, userTimezone)) {
+          // Chosen behavior: Option (a) - Hold reminder until quiet hours end.
+          // Release claim back to 'scheduled' without changing original scheduledAt.
+          await db
+            .update(reminders)
+            .set({
+              status: "scheduled",
+              updatedAt: now,
+            })
+            .where(eq(reminders.id, reminder.id));
+
+          results.push({
+            reminderId: reminder.id,
+            userId: reminder.userId,
+            channel: reminder.channel as any,
+            status: "held_quiet_hours",
+            held: true,
+            reason: "quiet_hours",
+          });
+          continue;
+        }
+
+        // 4. Dispatch via notificationDispatcher
         const result = await notificationDispatcher.dispatch({
           reminderId: reminder.id,
           userId: reminder.userId,
@@ -374,19 +487,30 @@ export class ReminderService {
           itemId: reminder.itemId || undefined,
         });
 
-        // Handle recurrence
+        // 5. Handle recurrence or explicit terminal status
         if (reminder.recurrence && reminder.recurrence !== "none") {
-          const nextScheduled = this.calculateNextRecurrence(reminder.scheduledAt, reminder.recurrence as any);
+          const nextScheduled = this.calculateNextRecurrence(reminder.scheduledAt, reminder.recurrence as any, userTimezone);
           if (nextScheduled) {
             await db
               .update(reminders)
               .set({
                 scheduledAt: nextScheduled,
                 status: "scheduled",
-                sentAt: new Date(),
+                sentAt: now,
+                updatedAt: now,
               })
               .where(eq(reminders.id, reminder.id));
           }
+        } else {
+          // Explicit terminal status: mark non-recurring reminder as 'sent' immediately in the same code path
+          await db
+            .update(reminders)
+            .set({
+              status: "sent",
+              sentAt: now,
+              updatedAt: now,
+            })
+            .where(eq(reminders.id, reminder.id));
         }
 
         results.push(result);
@@ -394,14 +518,44 @@ export class ReminderService {
           type: "changed",
           entity: "reminder",
           id: reminder.id,
-          at: new Date().toISOString(),
+          at: now.toISOString(),
         });
       } catch (err: any) {
         console.error(`Failed to dispatch reminder ${reminder.id}:`, err);
+        // Release claim on unexpected error so it can be retried on next run
+        await db
+          .update(reminders)
+          .set({
+            status: "scheduled",
+            updatedAt: now,
+          })
+          .where(eq(reminders.id, reminder.id));
       }
     }
 
     return results;
+  }
+
+  startScheduler(intervalMs: number = 60000) {
+    if (this.schedulerInterval) return;
+    this.schedulerInterval = setInterval(async () => {
+      try {
+        await this.dispatchDueReminders();
+      } catch (err) {
+        console.error("[ReminderScheduler] Error during automatic dispatch:", err);
+      }
+    }, intervalMs);
+
+    if (this.schedulerInterval.unref) {
+      this.schedulerInterval.unref();
+    }
+  }
+
+  stopScheduler() {
+    if (this.schedulerInterval) {
+      clearInterval(this.schedulerInterval);
+      this.schedulerInterval = null;
+    }
   }
 }
 
