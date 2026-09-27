@@ -306,4 +306,54 @@ describe("Automatic Background Reminder Dispatch & Quiet Hours Enforcement", () 
       process.env.CRON_SECRET = originalSecret;
     }
   });
+
+  // 7. Specific Test: One-time reminder terminal status & non-reclaim after stuckTimeoutMs
+  it("one-time reminder dispatches successfully, time advances past stuckTimeoutMs, dispatchDueReminders runs again, assert dispatch was called exactly once total across both runs", async () => {
+    const user = await createTestUserWithSettings({
+      timezone: "UTC",
+      quietHoursEnabled: false,
+    });
+
+    const t0 = new Date("2026-10-15T10:00:00Z");
+    const [reminder] = await db
+      .insert(reminders)
+      .values({
+        userId: user.id,
+        title: "One-Time Terminal Status Test Reminder",
+        scheduledAt: new Date("2026-10-15T09:50:00Z"), // Due 10m before T0
+        recurrence: "none",
+        status: "scheduled",
+        channel: "web",
+      })
+      .returning();
+
+    // Run 1 at T0
+    const resultsRun1 = await reminderService.dispatchDueReminders(t0, 5 * 60 * 1000);
+    const deliveredRun1 = resultsRun1.filter(
+      (r: any) => r.status === "delivered" && (r.idempotencyKey?.includes(reminder.id) || r.payload?.tag?.includes(reminder.id))
+    );
+    expect(deliveredRun1.length).toBe(1);
+
+    // Assert status is now terminal 'sent'
+    const [dbAfterRun1] = await db.select().from(reminders).where(eq(reminders.id, reminder.id));
+    expect(dbAfterRun1.status).toBe("sent");
+
+    // Advance time past stuckTimeoutMs (15 minutes past T0, well beyond 5m timeout)
+    const tFuture = new Date(t0.getTime() + 15 * 60 * 1000);
+
+    // Run 2 at tFuture
+    const resultsRun2 = await reminderService.dispatchDueReminders(tFuture, 5 * 60 * 1000);
+    const deliveredRun2 = resultsRun2.filter(
+      (r: any) => r.status === "delivered" && (r.idempotencyKey?.includes(reminder.id) || r.payload?.tag?.includes(reminder.id))
+    );
+    expect(deliveredRun2.length).toBe(0);
+
+    // Assert dispatch was called exactly once total across both runs
+    const totalDelivered = [...deliveredRun1, ...deliveredRun2];
+    expect(totalDelivered.length).toBe(1);
+
+    // Assert notification logs table only has 1 record for this reminder
+    const logs = await db.select().from(notificationLogs).where(eq(notificationLogs.reminderId, reminder.id));
+    expect(logs.length).toBe(1);
+  });
 });

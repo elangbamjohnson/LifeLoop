@@ -13,7 +13,7 @@ jobs:
     steps:
       - name: Send Dispatch Trigger Request
         env:
-          RENDER_APP_URL: ${{ secrets.RENDER_APP_URL || 'https://lifeloop.onrender.com' }}
+          RENDER_APP_URL: ${{ secrets.RENDER_APP_URL || 'https://lifeloop-45xr.onrender.com' }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           echo "Triggering reminder dispatch at $RENDER_APP_URL..."

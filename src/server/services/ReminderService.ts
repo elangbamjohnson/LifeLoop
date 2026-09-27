@@ -487,7 +487,7 @@ export class ReminderService {
           itemId: reminder.itemId || undefined,
         });
 
-        // 5. Handle recurrence
+        // 5. Handle recurrence or explicit terminal status
         if (reminder.recurrence && reminder.recurrence !== "none") {
           const nextScheduled = this.calculateNextRecurrence(reminder.scheduledAt, reminder.recurrence as any, userTimezone);
           if (nextScheduled) {
@@ -501,6 +501,16 @@ export class ReminderService {
               })
               .where(eq(reminders.id, reminder.id));
           }
+        } else {
+          // Explicit terminal status: mark non-recurring reminder as 'sent' immediately in the same code path
+          await db
+            .update(reminders)
+            .set({
+              status: "sent",
+              sentAt: now,
+              updatedAt: now,
+            })
+            .where(eq(reminders.id, reminder.id));
         }
 
         results.push(result);
