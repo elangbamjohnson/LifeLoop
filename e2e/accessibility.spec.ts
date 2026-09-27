@@ -28,6 +28,14 @@ test.describe('Accessibility Scans (@axe-core/playwright)', () => {
     for (const theme of themes) {
       test(`Axe scan across 6 states on ${vp.name} (${vp.width}x${vp.height}) in ${theme} mode`, async ({ page }) => {
         await page.setViewportSize({ width: vp.width, height: vp.height });
+        await page.emulateMedia({ colorScheme: theme });
+        await page.addInitScript((t) => {
+          try {
+            localStorage.setItem('lifeloop-theme', t);
+            document.documentElement.classList.remove('light', 'dark');
+            document.documentElement.classList.add(t);
+          } catch (_) {}
+        }, theme);
         await page.goto('/');
         await page.waitForSelector('main', { state: 'visible' });
         await setTheme(page, theme);
@@ -266,6 +274,14 @@ test.describe('Accessibility Scans: Email Verification (@axe-core/playwright)', 
     for (const theme of themes) {
       test(`Axe scan email verification screens on ${vp.name} (${vp.width}x${vp.height}) in ${theme} mode`, async ({ page }) => {
         await page.setViewportSize({ width: vp.width, height: vp.height });
+        await page.emulateMedia({ colorScheme: theme });
+        await page.addInitScript((t) => {
+          try {
+            localStorage.setItem('lifeloop-theme', t);
+            document.documentElement.classList.remove('light', 'dark');
+            document.documentElement.classList.add(t);
+          } catch (_) {}
+        }, theme);
         
         // 1. Registration Screen
         await page.goto('/auth');
