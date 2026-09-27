@@ -138,19 +138,23 @@ test.describe('Horizontal Scrolling & Overflow Audit', () => {
       stateReports.push(rep1);
 
       // State 2: PreferencesModal Open
-      const settingsBtn = page.locator('#reminder-preferences-btn');
-      if (await settingsBtn.isVisible()) {
-        await settingsBtn.click();
-        await page.waitForSelector('#preferences-modal-card', { state: 'visible', timeout: 5000 });
-        await page.waitForTimeout(250);
+      const profileBtn = page.locator('#user-profile-menu-btn');
+      if (await profileBtn.isVisible()) {
+        await profileBtn.click();
+        const prefsBtn = page.locator('#profile-preferences-btn');
+        if (await prefsBtn.isVisible()) {
+          await prefsBtn.click();
+          await page.waitForSelector('#preferences-modal-card', { state: 'visible', timeout: 5000 });
+          await page.waitForTimeout(250);
 
-        const rep2 = await auditHorizontalOverflow(page, 'PreferencesModal Open', viewport.name, viewport.width);
-        stateReports.push(rep2);
+          const rep2 = await auditHorizontalOverflow(page, 'PreferencesModal Open', viewport.name, viewport.width);
+          stateReports.push(rep2);
 
-        // Close modal
-        await page.keyboard.press('Escape');
-        await page.waitForSelector('#preferences-modal-card', { state: 'hidden', timeout: 5000 });
-        await page.waitForTimeout(200);
+          // Close modal
+          await page.keyboard.press('Escape');
+          await page.waitForSelector('#preferences-modal-card', { state: 'hidden', timeout: 5000 });
+          await page.waitForTimeout(200);
+        }
       }
 
       // State 3: ItemCard Expanded
@@ -311,10 +315,10 @@ test.describe('Horizontal Scrolling & Overflow Audit', () => {
         await expect(tab).toBeVisible();
       }
 
-      // Settings and Profile buttons are reachable
-      const prefsBtn = railHeader.locator('#reminder-preferences-btn');
-      await prefsBtn.scrollIntoViewIfNeeded();
-      await expect(prefsBtn).toBeVisible();
+      // Profile button is reachable
+      const profileBtn = railHeader.locator('#user-profile-menu-btn');
+      await profileBtn.scrollIntoViewIfNeeded();
+      await expect(profileBtn).toBeVisible();
     }
   });
 
@@ -360,8 +364,11 @@ test.describe('Horizontal Scrolling & Overflow Audit', () => {
     await page.goto('/');
     await page.waitForSelector('main', { state: 'visible' });
 
-    // Open preferences modal
-    const prefsBtn = page.locator('#reminder-preferences-btn');
+    // Open preferences modal via profile menu
+    const profileBtn = page.locator('#user-profile-menu-btn');
+    await expect(profileBtn).toBeVisible();
+    await profileBtn.click();
+    const prefsBtn = page.locator('#profile-preferences-btn');
     await expect(prefsBtn).toBeVisible();
     await prefsBtn.click();
     await page.waitForSelector('#preferences-modal-card', { state: 'visible' });

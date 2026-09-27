@@ -84,7 +84,6 @@ export function Dashboard() {
   const moreSheetRef = useRef<HTMLDivElement>(null);
   const moreBtnRef = useRef<HTMLButtonElement>(null);
   const captureBtnRef = useRef<HTMLButtonElement>(null);
-  const prefsBtnRef = useRef<HTMLButtonElement>(null);
 
   const [profileMenuStyles, setProfileMenuStyles] = useState<React.CSSProperties>({});
 
@@ -610,18 +609,6 @@ export function Dashboard() {
               ) : (
                 <Moon className="w-5 h-5 text-[#78716C]" />
               )}
-            </button>
-
-            <button
-              ref={prefsBtnRef}
-              id="reminder-preferences-btn"
-              type="button"
-              onClick={() => setIsPreferencesOpen(true)}
-              className="touch-target-48 min-w-[48px] min-h-[48px] flex items-center justify-center p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-[#78716C] dark:text-[#A8A29E] shrink-0"
-              title="Reminder Preferences"
-              aria-label="Reminder Preferences"
-            >
-              <Settings className="w-5 h-5" />
             </button>
 
             {user && (
@@ -1612,7 +1599,7 @@ export function Dashboard() {
         onClose={() => {
           setIsPreferencesOpen(false);
           setTimeout(() => {
-            prefsBtnRef.current?.focus();
+            profileBtnRef.current?.focus();
           }, 50);
         }}
       />
