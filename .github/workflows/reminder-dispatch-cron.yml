@@ -1,0 +1,35 @@
+name: Scheduled Reminder Dispatch
+
+on:
+  schedule:
+    # Run every 10 minutes to trigger automatic dispatch and keep Render service awake
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub UI for testing
+
+jobs:
+  dispatch-reminders:
+    name: Dispatch Due Reminders
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Dispatch Trigger Request
+        env:
+          RENDER_APP_URL: ${{ secrets.RENDER_APP_URL || 'https://lifeloop.onrender.com' }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          echo "Triggering reminder dispatch at $RENDER_APP_URL..."
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "$RENDER_APP_URL/api/v1/reminders/dispatch-now" \
+            -H "Content-Type: application/json" \
+            -H "X-Cron-Secret: $CRON_SECRET")
+
+          BODY=$(echo "$RESPONSE" | sed -e '$d')
+          STATUS=$(echo "$RESPONSE" | tail -n1 | cut -d':' -f2)
+
+          echo "Response Body: $BODY"
+          echo "HTTP Status: $STATUS"
+
+          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 300 ]; then
+            echo "Successfully dispatched reminders."
+          else
+            echo "Error: Failed with status $STATUS"
+            exit 1
+          fi

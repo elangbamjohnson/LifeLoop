@@ -227,11 +227,34 @@ remindersRouter.delete("/:id", requireAuth, validateUuidParams("id"), async (req
   }
 });
 
-// 7. Trigger manual dispatch of due reminders (for tests or frontend synchronization)
-remindersRouter.post("/dispatch-now", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+// 7. Trigger dispatch of due reminders (called by background cron or authenticated user)
+remindersRouter.post("/dispatch-now", async (req: AuthenticatedRequest, res, next) => {
   try {
-    const results = await reminderService.dispatchDueReminders(new Date());
-    res.json({ success: true, count: results.length, results });
+    const cronSecret = process.env.CRON_SECRET;
+    const incomingCronSecret =
+      (req.headers["x-cron-secret"] as string) ||
+      (req.headers.authorization?.startsWith("Bearer ")
+        ? req.headers.authorization.slice(7)
+        : undefined);
+
+    const isCronAuthorized = Boolean(
+      cronSecret && incomingCronSecret && cronSecret === incomingCronSecret
+    );
+
+    if (isCronAuthorized) {
+      const results = await reminderService.dispatchDueReminders(new Date());
+      return res.json({ success: true, count: results.length, results, trigger: "cron" });
+    }
+
+    // Fall back to standard session cookie authentication
+    requireAuth(req, res, async () => {
+      try {
+        const results = await reminderService.dispatchDueReminders(new Date());
+        res.json({ success: true, count: results.length, results, trigger: "manual" });
+      } catch (err) {
+        next(err);
+      }
+    });
   } catch (error) {
     next(error);
   }
