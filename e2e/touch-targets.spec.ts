@@ -310,7 +310,10 @@ test.describe('Touch Targets Audit (Apple HIG 44pt & Material 3 48dp)', () => {
       await page.waitForTimeout(200);
 
       // State 4: PreferencesModal open
-      const prefsBtn = page.locator('#reminder-preferences-btn');
+      const profileBtn = page.locator('#user-profile-menu-btn');
+      await expect(profileBtn).toBeVisible();
+      await profileBtn.click();
+      const prefsBtn = page.locator('#profile-preferences-btn');
       await expect(prefsBtn).toBeVisible();
       await prefsBtn.click();
       await page.waitForSelector('#preferences-modal-card', { state: 'visible', timeout: 5000 });

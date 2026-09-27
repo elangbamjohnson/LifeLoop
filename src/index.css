@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant dark (.dark &, &.dark);
 @custom-variant touch (@media (pointer: coarse));
 @custom-variant fine (@media (pointer: fine));
 @custom-variant medium (@media (min-width: 600px));
@@ -10,6 +10,15 @@
 @theme {
   --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Playfair Display", ui-serif, Georgia, serif;
+}
+
+@layer components {
+  .chrome-tab-item {
+    color: #57534E;
+  }
+  .dark .chrome-tab-item {
+    color: #D6D3D1;
+  }
 }
 
 :root {
