@@ -11,7 +11,7 @@ export interface AIProvider {
 /**
  * Shared helper to save extracted items and automatically compute relation suggestions and reminders.
  */
-async function saveExtractedItems(
+export async function saveExtractedItems(
   userId: string,
   captureId: string,
   parsedItems: any[],
@@ -89,8 +89,13 @@ async function saveExtractedItems(
       }
     }
 
+    const hasExplicitTime =
+      item.hasExplicitTime === true ||
+      (item.metadata && item.metadata.hasExplicitTime === true);
+
     const metadataToSave = {
       ...(item.metadata || {}),
+      hasExplicitTime,
       ...(suggestedRelationTargetId ? {
         suggestedRelationTargetId,
         suggestedRelationTitle,
@@ -135,15 +140,14 @@ async function saveExtractedItems(
       }
     }
 
-    // Create relative reminders if autoReminders is enabled and item has a valid dueDate
+    // Create reminders if autoReminders is enabled and item has a valid dueDate
     if (autoRemindersEnabled && isHighConfidence && createdItem.dueDate) {
-      await reminderService.createStandardRelativeReminders(
+      await reminderService.createRemindersForItem(
         createdItem.id,
         userId,
         createdItem.title,
         createdItem.dueDate,
-        [-30, -7, -1, 0],
-        "web",
+        hasExplicitTime,
         userTimezone
       );
     }
@@ -199,6 +203,10 @@ Classification Rules for itemType:
 - "appointment": Doctor visits, dentist appointments, service appointments scheduled for a specific time.
 - "task": General to-dos and action items.
 
+Deadline & Time Rules:
+- "dueDate": ISO 8601 string timestamp with correct timezone offset (e.g. 2026-10-15T09:00:00-04:00) or null if no deadline/due date mentioned. For date-only deadlines without an explicit clock time (e.g. "on Oct 5", "due next Friday", "due the 18th", "by end of month", "March 2027", "Meeting with Henderson tomorrow"), set the time component of dueDate to 09:00:00 in the user's timezone.
+- "hasExplicitTime": boolean; true ONLY if the user stated a clock time or a relative duration ("at 4:30 pm", "in 2 minutes", "tomorrow 10 am", "Gym at 6"); false for date-only ("on Oct 5", "next Friday", "the 18th", "by end of month", "March 2027", "Meeting with Henderson tomorrow"); false when unsure.
+
 User input (${type}):
 "${rawPayload}"
 
@@ -208,7 +216,8 @@ Return ONLY valid JSON adhering strictly to this schema:
     {
       "title": "Clear, concise title (e.g. Geico Car Insurance Renewal, Downtown Auto Care Oil Change, Mr. Henderson Pipe Repair)",
       "itemType": "renewal" | "payment" | "waiting_for" | "subscription" | "document" | "appointment" | "vehicle" | "home" | "task",
-      "dueDate": "ISO 8601 string timestamp with correct timezone offset (e.g. 2026-10-15T09:00:00-04:00) or null if no deadline/due date mentioned",
+      "dueDate": "ISO 8601 string timestamp with correct timezone offset (e.g. 2026-10-05T09:00:00-04:00 for date-only at 09:00:00 local time, or exact timestamp when clock time is specified) or null if no deadline",
+      "hasExplicitTime": false,
       "confidenceScore": 0.95,
       "metadata": {
         "amount": 185.50 or null,
@@ -296,16 +305,65 @@ export class MockAIProvider implements AIProvider {
       return;
     }
 
-    // Helper: try extracting dynamic date if present in string like "October 15, 2026"
-    const parseDynamicDate = (str: string): Date | null => {
-      const monthNames = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
-      const regex = new RegExp(`(${monthNames}\\s+\\d{1,2}(?:st|nd|rd|th)?,?\\s+\\d{4})`, "i");
-      const match = str.match(regex);
-      if (match) {
-        const d = new Date(match[1]);
-        if (!isNaN(d.getTime())) return d;
+    // Helper: try extracting dynamic date and/or time from string
+    const parseDynamicDateTime = (str: string): { dueDate: Date | null; hasExplicitTime: boolean } => {
+      const lowerStr = str.toLowerCase();
+
+      // 1. Relative time like "in 2 minutes", "in 5 mins", "in 1 hour"
+      const relativeMatch = lowerStr.match(/\bin\s+(\d+)\s*(minute|min|hour|hr|second|sec)s?\b/i);
+      if (relativeMatch) {
+        const val = parseInt(relativeMatch[1], 10);
+        const unit = relativeMatch[2].toLowerCase();
+        const multiplier = unit.startsWith("h") ? 3600000 : unit.startsWith("s") ? 1000 : 60000;
+        return {
+          dueDate: new Date(Date.now() + val * multiplier),
+          hasExplicitTime: true,
+        };
       }
-      return null;
+
+      // 2. Explicit clock time like "at 4:30 pm", "at 4:30", "at 16:30", "4:30 pm"
+      const timeMatch = lowerStr.match(/\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i) ||
+                         lowerStr.match(/\bat\s+(\d{1,2}):(\d{2})\b/i);
+
+      // Check if a calendar date is also mentioned (e.g. "Oct 5", "October 15, 2026")
+      const monthNames = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
+      const dateRegex = new RegExp(`(${monthNames}\\s+\\d{1,2}(?:st|nd|rd|th)?,?(?:\\s+\\d{4})?)`, "i");
+      const dateMatch = str.match(dateRegex);
+
+      if (timeMatch) {
+        let hours = parseInt(timeMatch[1], 10);
+        const minutes = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+        const meridian = timeMatch[3]?.toLowerCase();
+
+        if (meridian === "pm" && hours < 12) hours += 12;
+        if (meridian === "am" && hours === 12) hours = 0;
+
+        let targetDate: Date;
+        if (dateMatch) {
+          const year = dateMatch[1].match(/\d{4}/) ? "" : ` ${new Date().getFullYear()}`;
+          targetDate = new Date(`${dateMatch[1]}${year}`);
+        } else {
+          targetDate = new Date();
+        }
+        targetDate.setHours(hours, minutes, 0, 0);
+        return {
+          dueDate: targetDate,
+          hasExplicitTime: true,
+        };
+      }
+
+      if (dateMatch) {
+        const year = dateMatch[1].match(/\d{4}/) ? "" : ` ${new Date().getFullYear()}`;
+        const d = new Date(`${dateMatch[1]}${year}`);
+        if (!isNaN(d.getTime())) {
+          return {
+            dueDate: d,
+            hasExplicitTime: false,
+          };
+        }
+      }
+
+      return { dueDate: null, hasExplicitTime: false };
     };
 
     // 1. Renewal / Insurance (evaluated before generic 'due')
@@ -313,19 +371,22 @@ export class MockAIProvider implements AIProvider {
       const matchAmount = rawPayload.match(/(?:₹|\$|€|£)\s*([0-9,]+(?:\.[0-9]{2})?)/);
       const amount = matchAmount ? parseFloat(matchAmount[1].replace(/,/g, "")) : 185.50;
       const currency = rawPayload.includes("$") ? "USD" : rawPayload.includes("€") ? "EUR" : "INR";
-      const dynamicDate = parseDynamicDate(rawPayload);
+      const dt = parseDynamicDateTime(rawPayload);
+      const dynamicDate = dt.dueDate;
 
       parsedItems.push({
         title: lower.includes("geico") ? "Geico Car Insurance Renewal" : "Car Insurance",
         itemType: "renewal",
         dueDate: dynamicDate || new Date("2026-10-15T09:00:00Z"),
+        hasExplicitTime: dt.hasExplicitTime,
         confidenceScore: 0.95,
         metadata: {
           object: "car insurance",
           amount,
           currency,
           policyNumber: rawPayload.match(/#?([A-Z0-9-]{6,})/)?.[1] || "GK-982341",
-          description: rawPayload
+          description: rawPayload,
+          hasExplicitTime: dt.hasExplicitTime,
         }
       });
     }
@@ -334,18 +395,21 @@ export class MockAIProvider implements AIProvider {
       const matchAmount = rawPayload.match(/(?:₹|\$|€|£)\s*([0-9,]+(?:\.[0-9]{2})?)/);
       const amount = matchAmount ? parseFloat(matchAmount[1].replace(/,/g, "")) : 2840;
       const currency = rawPayload.includes("$") ? "USD" : rawPayload.includes("€") ? "EUR" : "INR";
-      const dynamicDate = parseDynamicDate(rawPayload);
+      const dt = parseDynamicDateTime(rawPayload);
+      const dynamicDate = dt.dueDate;
       
       parsedItems.push({
         title: "Electricity bill",
         itemType: "payment",
         dueDate: dynamicDate || new Date("2026-09-18T09:00:00Z"),
+        hasExplicitTime: dt.hasExplicitTime,
         confidenceScore: 0.95,
         metadata: {
           amount,
           currency,
           dueDate: dynamicDate ? dynamicDate.toISOString().split("T")[0] : "2026-09-18",
           description: "Electricity bill",
+          hasExplicitTime: dt.hasExplicitTime,
         }
       });
     } 
@@ -467,19 +531,36 @@ export class MockAIProvider implements AIProvider {
         }
       });
     }
-    // 9. Reminder
-    else if (lower.includes("remind me")) {
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(9, 0, 0, 0);
+    // 9. Reminder / Explicit Time / Dynamic date-time
+    else if (
+      lower.includes("remind me") ||
+      lower.includes("in 2 minutes") ||
+      lower.includes("at 4:30") ||
+      lower.includes("dentist") ||
+      lower.includes("rent") ||
+      parseDynamicDateTime(rawPayload).dueDate !== null
+    ) {
+      const dt = parseDynamicDateTime(rawPayload);
+      let dueDate = dt.dueDate;
+      let hasExplicitTime = dt.hasExplicitTime;
 
+      if (!dueDate) {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(9, 0, 0, 0);
+        dueDate = tomorrow;
+        hasExplicitTime = false;
+      }
+
+      let title = rawPayload.replace(/^remind me (?:to\s+)?/i, "").trim() || "Reminder";
       parsedItems.push({
-        title: rawPayload.replace(/remind me to/i, "").trim() || "Reminder",
-        itemType: "reminder",
-        dueDate: tomorrow,
-        confidenceScore: 0.90,
+        title: title.length > 50 ? title.substring(0, 50) + "..." : title,
+        itemType: lower.includes("dentist") || lower.includes("doctor") ? "appointment" : lower.includes("rent") ? "payment" : "task",
+        dueDate,
+        hasExplicitTime,
+        confidenceScore: 0.95,
         metadata: {
-          trigger: "tomorrow at 9am",
+          hasExplicitTime,
         }
       });
     }

@@ -17,6 +17,7 @@ export interface CreateReminderParams {
   timezone?: string; // e.g. 'America/New_York', 'UTC', etc.
   targetHour?: number; // default 9 (9:00 AM)
   targetMinute?: number; // default 0
+  metadata?: any;
 }
 
 /**
@@ -191,6 +192,7 @@ export class ReminderService {
         recurrence: params.recurrence || "none",
         channel: params.channel || "web",
         status: "scheduled",
+        metadata: { manual: true, ...(params.metadata || {}) },
       })
       .returning();
 
@@ -215,88 +217,340 @@ export class ReminderService {
     dueDate: Date,
     offsets: number[] = [-30, -7, -1, 0],
     channel: "web" | "ios" | "android" | "email" = "web",
-    timezone: string = "UTC"
+    timezone: string = "UTC",
+    tx?: any
   ) {
-    const created = [];
-    const now = new Date();
+    const execute = async (client: any) => {
+      const created = [];
+      const now = new Date();
 
-    for (const offset of offsets) {
-      const scheduledAt = this.calculateScheduledDate(dueDate, offset, 9, 0, timezone);
-      
-      // Only schedule future or near-future reminders
-      if (scheduledAt.getTime() > now.getTime() - 24 * 60 * 60 * 1000) {
-        let label = "Due today";
-        if (offset === -1) label = "Due tomorrow (1 day before)";
-        else if (offset < 0) label = `Due in ${Math.abs(offset)} days`;
+      for (const offset of offsets) {
+        const scheduledAt = this.calculateScheduledDate(dueDate, offset, 9, 0, timezone);
+        
+        // Only schedule future or near-future reminders
+        if (scheduledAt.getTime() > now.getTime() - 24 * 60 * 60 * 1000) {
+          // Idempotency check: don't create duplicate if active, dispatching, or sent reminder for this offset exists
+          const [existing] = await client
+            .select()
+            .from(reminders)
+            .where(
+              and(
+                eq(reminders.itemId, itemId),
+                eq(reminders.relativeOffsetDays, offset),
+                or(
+                  eq(reminders.status, "scheduled"),
+                  eq(reminders.status, "snoozed"),
+                  eq(reminders.status, "dispatching"),
+                  eq(reminders.status, "sent")
+                )
+              )
+            )
+            .limit(1);
 
-        const [r] = await db
+          if (existing) continue;
+
+          let label = "Due today";
+          if (offset === -1) label = "Due tomorrow (1 day before)";
+          else if (offset < 0) label = `Due in ${Math.abs(offset)} days`;
+
+          const [r] = await client
+            .insert(reminders)
+            .values({
+              userId,
+              itemId,
+              title: `${itemTitle} - ${label}`,
+              triggerType: "relative_to_deadline",
+              relativeOffsetDays: offset,
+              scheduledAt,
+              recurrence: "none",
+              channel,
+              status: "scheduled",
+              metadata: { autoCreated: true },
+            })
+            .returning();
+          created.push(r);
+        }
+      }
+
+      if (created.length > 0) {
+        eventBus.publish(userId, {
+          type: "changed",
+          entity: "reminder",
+          at: new Date().toISOString(),
+        });
+      }
+
+      return created;
+    };
+
+    if (tx) {
+      return execute(tx);
+    } else {
+      return db.transaction(async (newTx) => execute(newTx));
+    }
+  }
+
+  /**
+   * Creates reminders for an item obeying exact-time vs date-only rules:
+   * Rule 2 (hasExplicitTime): exactly one reminder at due instant if not >60s past.
+   * Rule 3 (date-only): ladder offsets [-30, -7, -1, 0] at 9:00 AM local time.
+   * Rule 6 (Idempotency): wrapped in a transaction; includes 'sent' reminders so reprocessing never creates duplicates.
+   */
+  async createRemindersForItem(
+    itemId: string,
+    userId: string,
+    itemTitle: string,
+    dueDate: Date,
+    hasExplicitTime: boolean,
+    timezone: string = "UTC",
+    tx?: any
+  ) {
+    const execute = async (client: any) => {
+      // Idempotency: check if any active/pending or sent reminder already exists for this item
+      const existing = await client
+        .select()
+        .from(reminders)
+        .where(
+          and(
+            eq(reminders.itemId, itemId),
+            or(
+              eq(reminders.status, "scheduled"),
+              eq(reminders.status, "snoozed"),
+              eq(reminders.status, "dispatching"),
+              eq(reminders.status, "sent")
+            )
+          )
+        );
+
+      const existingAuto = existing.filter(
+        (r: any) => (r.metadata as any)?.autoCreated === true || !(r.metadata as any)?.manual
+      );
+
+      if (existingAuto.length > 0) {
+        return existingAuto;
+      }
+
+      if (hasExplicitTime) {
+        const now = new Date();
+        // If the due time is already more than 60 seconds in the past when the item is created, create nothing.
+        if (dueDate.getTime() <= now.getTime() - 60 * 1000) {
+          return [];
+        }
+
+        const [r] = await client
           .insert(reminders)
           .values({
             userId,
             itemId,
-            title: `${itemTitle} - ${label}`,
-            triggerType: "relative_to_deadline",
-            relativeOffsetDays: offset,
-            scheduledAt,
+            title: itemTitle,
+            triggerType: "exact_time",
+            relativeOffsetDays: 0,
+            scheduledAt: dueDate,
             recurrence: "none",
-            channel,
+            channel: "web",
             status: "scheduled",
+            metadata: { autoCreated: true },
           })
           .returning();
-        created.push(r);
+
+        eventBus.publish(userId, {
+          type: "changed",
+          entity: "reminder",
+          id: r.id,
+          at: new Date().toISOString(),
+        });
+
+        return [r];
+      } else {
+        return this.createStandardRelativeReminders(
+          itemId,
+          userId,
+          itemTitle,
+          dueDate,
+          [-30, -7, -1, 0],
+          "web",
+          timezone,
+          client
+        );
       }
+    };
+
+    if (tx) {
+      return execute(tx);
+    } else {
+      return db.transaction(async (newTx) => execute(newTx));
+    }
+  }
+
+  /**
+   * Single shared service method for lifecycle synchronization of item reminders:
+   * - Item completed: cancel pending reminders (scheduled/snoozed), leave sent and dispatching untouched.
+   * - Item uncompleted (reopened): do NOT resurrect cancelled reminders.
+   * - Item deleted: cancel pending reminders, detach itemId to null and record deletedItemId to preserve audit trail. Leave sent and dispatching untouched.
+   * - Item due date edited: cancel pending auto-created reminders, create new ones under rules 2/3. Leave manual reminders untouched.
+   */
+  async syncItemReminderLifecycle(
+    itemId: string,
+    userId: string,
+    action: "complete" | "reopen" | "delete" | "reschedule",
+    options?: {
+      newDueDate?: Date | null;
+      hasExplicitTime?: boolean;
+      timezone?: string;
+      itemTitle?: string;
+    },
+    tx?: any
+  ) {
+    const client = tx || db;
+
+    if (action === "reopen") {
+      // Reopening a completed item does NOT resurrect cancelled reminders.
+      return;
     }
 
-    if (created.length > 0) {
-      eventBus.publish(userId, {
-        type: "changed",
-        entity: "reminder",
-        at: new Date().toISOString(),
-      });
+    if (action === "complete") {
+      // Set pending reminders (status 'scheduled' or 'snoozed') to 'cancelled'. Leave 'dispatching' and 'sent' alone.
+      const pending = await client
+        .select()
+        .from(reminders)
+        .where(
+          and(
+            eq(reminders.itemId, itemId),
+            eq(reminders.userId, userId),
+            or(eq(reminders.status, "scheduled"), eq(reminders.status, "snoozed"))
+          )
+        );
+
+      if (pending.length > 0) {
+        await client
+          .update(reminders)
+          .set({ status: "cancelled" })
+          .where(
+            and(
+              eq(reminders.itemId, itemId),
+              eq(reminders.userId, userId),
+              or(eq(reminders.status, "scheduled"), eq(reminders.status, "snoozed"))
+            )
+          );
+
+        for (const r of pending) {
+          eventBus.publish(userId, {
+            type: "changed",
+            entity: "reminder",
+            id: r.id,
+            at: new Date().toISOString(),
+          });
+        }
+      }
+      return;
     }
 
-    return created;
+    if (action === "delete") {
+      // Cancel pending reminders, detach itemId to null and preserve audit records in metadata.
+      // Leave 'dispatching' and 'sent' alone (their status stays 'dispatching' or 'sent').
+      const allReminders = await client
+        .select()
+        .from(reminders)
+        .where(and(eq(reminders.itemId, itemId), eq(reminders.userId, userId)));
+
+      for (const r of allReminders) {
+        const isPending = r.status === "scheduled" || r.status === "snoozed";
+        const newStatus = isPending ? "cancelled" : r.status;
+        const currentMeta = (r.metadata as any) || {};
+
+        await client
+          .update(reminders)
+          .set({
+            status: newStatus,
+            itemId: null,
+            metadata: { ...currentMeta, originalItemId: itemId, deletedItemId: itemId },
+          })
+          .where(eq(reminders.id, r.id));
+
+        if (isPending) {
+          eventBus.publish(userId, {
+            type: "changed",
+            entity: "reminder",
+            id: r.id,
+            at: new Date().toISOString(),
+          });
+        }
+      }
+      return;
+    }
+
+    if (action === "reschedule") {
+      // Cancel pending auto-created reminders for that item.
+      // Reminders created manually via the API are NOT touched.
+      const itemReminders = await client
+        .select()
+        .from(reminders)
+        .where(and(eq(reminders.itemId, itemId), eq(reminders.userId, userId)));
+
+      for (const r of itemReminders) {
+        const isPending = r.status === "scheduled" || r.status === "snoozed";
+        if (!isPending) continue;
+
+        const isAuto =
+          (r.metadata as any)?.autoCreated === true ||
+          (!(r.metadata as any)?.manual && r.triggerType === "relative_to_deadline");
+
+        if (isAuto) {
+          await client
+            .update(reminders)
+            .set({ status: "cancelled" })
+            .where(eq(reminders.id, r.id));
+
+          eventBus.publish(userId, {
+            type: "changed",
+            entity: "reminder",
+            id: r.id,
+            at: new Date().toISOString(),
+          });
+        }
+      }
+
+      // If a new due date is provided, create new reminders under rules 2/3
+      if (options?.newDueDate) {
+        let title = options.itemTitle;
+        if (!title) {
+          const [it] = await client.select().from(items).where(eq(items.id, itemId)).limit(1);
+          title = it?.title || "Reminder";
+        }
+
+        let timezone = options.timezone;
+        if (!timezone) {
+          const [user] = await client.select().from(users).where(eq(users.id, userId)).limit(1);
+          timezone = (user?.settings as any)?.timezone || "UTC";
+        }
+
+        await this.createRemindersForItem(
+          itemId,
+          userId,
+          title,
+          options.newDueDate,
+          options.hasExplicitTime ?? false,
+          timezone,
+          client
+        );
+      }
+      return;
+    }
   }
 
   /**
    * Reschedules all relative_to_deadline reminders when an item's deadline changes.
    */
-  async rescheduleForDeadlineChange(itemId: string, newDueDate: Date, timezone: string = "UTC") {
-    const existing = await db
-      .select()
-      .from(reminders)
-      .where(and(eq(reminders.itemId, itemId), eq(reminders.triggerType, "relative_to_deadline")));
+  async rescheduleForDeadlineChange(itemId: string, newDueDate: Date, timezone: string = "UTC", hasExplicitTime?: boolean) {
+    const [it] = await db.select().from(items).where(eq(items.id, itemId)).limit(1);
+    if (!it) return [];
 
-    const updated = [];
-    for (const reminder of existing) {
-      const newScheduledAt = this.calculateScheduledDate(
-        newDueDate,
-        reminder.relativeOffsetDays ?? 0,
-        9,
-        0,
-        timezone
-      );
-
-      const [u] = await db
-        .update(reminders)
-        .set({
-          scheduledAt: newScheduledAt,
-          status: "scheduled", // Reactivate if it was previously triggered
-        })
-        .where(eq(reminders.id, reminder.id))
-        .returning();
-      updated.push(u);
-    }
-
-    if (updated.length > 0 && existing[0]?.userId) {
-      eventBus.publish(existing[0].userId, {
-        type: "changed",
-        entity: "reminder",
-        at: new Date().toISOString(),
-      });
-    }
-
-    return updated;
+    await this.syncItemReminderLifecycle(itemId, it.userId, "reschedule", {
+      newDueDate,
+      timezone,
+      hasExplicitTime: hasExplicitTime ?? (it.metadata as any)?.hasExplicitTime ?? false,
+      itemTitle: it.title,
+    });
   }
 
   /**
@@ -356,7 +610,7 @@ export class ReminderService {
   }
 
   /**
-   * Completes an item and marks all associated reminders as dismissed.
+   * Completes an item and synchronizes reminders via syncItemReminderLifecycle.
    */
   async completeItem(itemId: string, userId: string, completed: boolean = true) {
     const [updatedItem] = await db
@@ -370,27 +624,12 @@ export class ReminderService {
 
     if (!updatedItem) return undefined;
 
-    if (completed) {
-      await db
-        .update(reminders)
-        .set({ status: "dismissed" })
-        .where(eq(reminders.itemId, itemId));
-    } else {
-      await db
-        .update(reminders)
-        .set({ status: "scheduled" })
-        .where(eq(reminders.itemId, itemId));
-    }
+    await this.syncItemReminderLifecycle(itemId, userId, completed ? "complete" : "reopen");
 
     eventBus.publish(userId, {
       type: "changed",
       entity: "item",
       id: updatedItem.id,
-      at: new Date().toISOString(),
-    });
-    eventBus.publish(userId, {
-      type: "changed",
-      entity: "reminder",
       at: new Date().toISOString(),
     });
 

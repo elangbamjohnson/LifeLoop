@@ -172,7 +172,18 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
     if (!isValidUUID(id)) {
       return res.status(400).json({ error: "Invalid format for identifier" });
     }
-    const { status, title, itemType, dueDate, metadata, snoozedUntil } = req.body;
+
+    const [existingItem] = await db
+      .select()
+      .from(items)
+      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
+      .limit(1);
+
+    if (!existingItem) {
+      return res.status(404).json({ error: "Item not found or could not be updated" });
+    }
+
+    const { status, title, itemType, dueDate, metadata, snoozedUntil, hasExplicitTime: bodyHasExplicitTime } = req.body;
     
     // Determine if we need to auto-adjust completedAt based on incoming status
     let completedAt: Date | null | undefined = undefined;
@@ -182,11 +193,25 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
       completedAt = null;
     }
 
+    const existingMeta = (existingItem.metadata as any) || {};
+    const baseMetadata = metadata !== undefined ? { ...metadata } : { ...existingMeta };
+
+    // Resolve hasExplicitTime:
+    // If not provided in request body, preserve the existing item's flag (behavior for PATCH dueDate edit with no hasExplicitTime).
+    // If provided in body (at top-level or inside metadata), use the provided boolean.
+    let resolvedHasExplicitTime: boolean;
+    if (bodyHasExplicitTime !== undefined) {
+      resolvedHasExplicitTime = Boolean(bodyHasExplicitTime);
+    } else if (metadata?.hasExplicitTime !== undefined) {
+      resolvedHasExplicitTime = Boolean(metadata.hasExplicitTime);
+    } else {
+      resolvedHasExplicitTime = Boolean(existingMeta.hasExplicitTime);
+    }
+
     const updatePayload: any = {};
     if (status !== undefined) updatePayload.status = status;
     if (title !== undefined) updatePayload.title = title;
     if (itemType !== undefined) updatePayload.itemType = itemType;
-    if (metadata !== undefined) updatePayload.metadata = metadata;
     if (snoozedUntil !== undefined) {
       updatePayload.snoozedUntil = snoozedUntil ? new Date(snoozedUntil) : null;
     }
@@ -197,27 +222,45 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
       updatePayload.completedAt = completedAt;
     }
 
-    const [updatedItem] = await db
-      .update(items)
-      .set(updatePayload)
-      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
-      .returning();
-
-    if (!updatedItem) {
-      return res.status(404).json({ error: "Item not found or could not be updated" });
+    // Persist the flag in item metadata on edit
+    if (dueDate !== undefined || bodyHasExplicitTime !== undefined || metadata !== undefined) {
+      updatePayload.metadata = {
+        ...baseMetadata,
+        hasExplicitTime: resolvedHasExplicitTime,
+      };
     }
 
-    // If deadline was provided in payload, automatically reschedule relative reminders
-    if (dueDate !== undefined) {
-      await reminderService.rescheduleForDeadlineChange(id, new Date(dueDate));
-    }
+    const updatedItem = await db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(items)
+        .set(updatePayload)
+        .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
+        .returning();
 
-    // If completed or reopened, adjust reminders
-    if (status === "completed") {
-      await db.update(reminders).set({ status: "dismissed" }).where(eq(reminders.itemId, id));
-    } else if (status === "active") {
-      await db.update(reminders).set({ status: "scheduled" }).where(eq(reminders.itemId, id));
-    }
+      // If deadline was provided in payload, automatically reschedule reminders
+      if (dueDate !== undefined) {
+        await reminderService.syncItemReminderLifecycle(
+          id,
+          req.userId!,
+          "reschedule",
+          {
+            newDueDate: dueDate ? new Date(dueDate) : null,
+            hasExplicitTime: resolvedHasExplicitTime,
+            itemTitle: updated.title,
+          },
+          tx
+        );
+      }
+
+      // If completed or reopened, adjust reminders via lifecycle sync
+      if (status === "completed") {
+        await reminderService.syncItemReminderLifecycle(id, req.userId!, "complete", undefined, tx);
+      } else if (status === "active") {
+        await reminderService.syncItemReminderLifecycle(id, req.userId!, "reopen", undefined, tx);
+      }
+
+      return updated;
+    });
 
     eventBus.publish(req.userId!, {
       type: "changed",
@@ -307,10 +350,18 @@ itemsRouter.delete("/:id", requireAuth, async (req: AuthenticatedRequest, res, n
       return res.status(400).json({ error: "Invalid format for identifier" });
     }
     
-    // Deleting item cascades to associated reminders
-    const [deletedItem] = await db.delete(items)
-      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
-      .returning();
+    // Wrap lifecycle sync and item delete in one db.transaction
+    const deletedItem = await db.transaction(async (tx) => {
+      // Sync reminder lifecycle before deleting item (cancels pending reminders, leaves sent alone, detaches itemId)
+      await reminderService.syncItemReminderLifecycle(id, req.userId!, "delete", undefined, tx);
+
+      const [deleted] = await tx
+        .delete(items)
+        .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
+        .returning();
+
+      return deleted;
+    });
     
     if (!deletedItem) {
       return res.status(404).json({ error: "Item not found" });

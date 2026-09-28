@@ -78,7 +78,7 @@ export const reminders = pgTable("reminders", {
   scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
   recurrence: varchar("recurrence", { length: 50 }).default("none").notNull(), // none, daily, weekly, monthly, yearly
   channel: varchar("channel", { length: 50 }).default("web").notNull(), // web, ios, android, email
-  status: varchar("status", { length: 50 }).default("scheduled").notNull(), // scheduled, sent, snoozed, dismissed
+  status: varchar("status", { length: 50 }).default("scheduled").notNull(), // scheduled, sent, snoozed, dismissed, cancelled
   sentAt: timestamp("sent_at", { withTimezone: true }),
   snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
   metadata: jsonb("metadata").default({}),

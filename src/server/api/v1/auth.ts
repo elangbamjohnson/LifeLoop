@@ -91,7 +91,7 @@ authRouter.post("/register", authLimiter, async (req, res, next) => {
           email: normalizedEmail, 
           passwordHash, 
           accountStatus: 'pending_verification',
-          settings: { timezone: timezone || "UTC" }
+          settings: { timezone: timezone || "UTC", autoReminders: true }
         })
         .returning({ id: users.id, email: users.email, isAdmin: users.isAdmin, accountStatus: users.accountStatus });
 
@@ -222,7 +222,7 @@ authRouter.post("/google", authLimiter, async (req, res, next) => {
             authProvider: "google",
             accountStatus: "active",
             emailVerifiedAt: new Date(),
-            settings: { timezone: timezone || "UTC" },
+            settings: { timezone: timezone || "UTC", autoReminders: true },
           })
           .returning();
         user = newUser;
