@@ -9,6 +9,7 @@ import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
 import crypto from "crypto";
 import { getEmailProvider } from "../../services/EmailProvider";
 import { OAuth2Client } from "google-auth-library";
+import { isValidTimezone } from "../../../shared/utils/timezone";
 
 export const authRouter = Router();
 
@@ -91,7 +92,7 @@ authRouter.post("/register", authLimiter, async (req, res, next) => {
           email: normalizedEmail, 
           passwordHash, 
           accountStatus: 'pending_verification',
-          settings: { timezone: timezone || "UTC", autoReminders: true }
+          settings: { timezone: isValidTimezone(timezone) ? timezone : "UTC", autoReminders: true }
         })
         .returning({ id: users.id, email: users.email, isAdmin: users.isAdmin, accountStatus: users.accountStatus });
 
@@ -222,7 +223,7 @@ authRouter.post("/google", authLimiter, async (req, res, next) => {
             authProvider: "google",
             accountStatus: "active",
             emailVerifiedAt: new Date(),
-            settings: { timezone: timezone || "UTC", autoReminders: true },
+            settings: { timezone: isValidTimezone(timezone) ? timezone : "UTC", autoReminders: true },
           })
           .returning();
         user = newUser;

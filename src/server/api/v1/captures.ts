@@ -8,6 +8,7 @@ import { validateUuidParams, applyUuidParamValidation } from "../../middlewares/
 import { storage } from "../../services/StorageProvider";
 import { aiProvider } from "../../services/AIProvider";
 import { eventBus } from "../../services/EventBus";
+import { isValidTimezone } from "../../../shared/utils/timezone";
 
 export const capturesRouter = Router();
 applyUuidParamValidation(capturesRouter);
@@ -77,7 +78,10 @@ capturesRouter.post("/", requireAuth, upload.single("file"), async (req: Authent
     res.status(201).json({ capture });
 
     // Kick off async processing (fire and forget for now)
-    const clientTimezone = req.headers['x-timezone'] as string | undefined;
+    const rawClientTimezone = req.headers['x-timezone'] as string | undefined;
+    const clientTimezone = rawClientTimezone !== undefined
+      ? (isValidTimezone(rawClientTimezone) ? rawClientTimezone : "UTC")
+      : undefined;
     processCaptureAsync(capture.id, req.userId!, capture.rawPayload, capture.type, (req as any).log, clientTimezone).catch(e => {
       (req as any).log?.error(e, `Async processing failed for capture ${capture.id}`);
     });

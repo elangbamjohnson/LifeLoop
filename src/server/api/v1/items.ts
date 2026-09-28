@@ -7,6 +7,7 @@ import { reminderService } from "../../services/ReminderService";
 import { eventBus } from "../../services/EventBus";
 import { groupItemsIntoTimeline, TimelineItem } from "../../../shared/utils/timeline";
 import { isValidUuid, applyUuidParamValidation } from "../../middlewares/validation";
+import { isValidTimezone } from "../../../shared/utils/timezone";
 
 export const itemsRouter = Router();
 applyUuidParamValidation(itemsRouter);
@@ -210,7 +211,17 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
 
     // Determine user's timezone for date/time calculations
     const [user] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
-    const userTimezone = (user?.settings as any)?.timezone || "UTC";
+    const savedTimezone = (user?.settings as any)?.timezone;
+    let userTimezone = isValidTimezone(savedTimezone) ? savedTimezone : null;
+    if (!userTimezone && req.headers["x-timezone"]) {
+      const headerTz = req.headers["x-timezone"] as string;
+      if (isValidTimezone(headerTz)) {
+        userTimezone = headerTz;
+        const currentSettings = (user?.settings as any) || {};
+        await db.update(users).set({ settings: { ...currentSettings, timezone: userTimezone } }).where(eq(users.id, req.userId!));
+      }
+    }
+    userTimezone = userTimezone || "UTC";
 
     let resolvedDueDate: Date | null | undefined = undefined;
     if (dueDate !== undefined) {

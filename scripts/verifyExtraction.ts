@@ -3,7 +3,8 @@ import { v4 as uuidv4 } from "uuid";
 import { db } from "../src/db";
 import { users, captures, items, reminders } from "../src/db/schema";
 import { eq, inArray } from "drizzle-orm";
-import { GeminiAIProvider, buildExtractionPrompt, GEMINI_MODEL } from "../src/server/services/AIProvider";
+import { GEMINI_MODEL, GeminiAIProvider } from "../src/server/services/AIProvider";
+import { getConnectionString } from "../src/db/config";
 
 // Ensure we run the real Gemini provider, not the test mock
 process.env.NODE_ENV = "development";
@@ -107,7 +108,7 @@ async function runPhrasesForTimezone(phrases: string[], timezone: string) {
 }
 
 async function main() {
-  const dbUrlStr = process.env.DATABASE_URL || "postgres://postgres:password@127.0.0.1:5433/lifeloop_dev_db";
+  const dbUrlStr = getConnectionString();
   const dbUrl = new URL(dbUrlStr);
   const redactedUrl = `${dbUrl.protocol}//${dbUrl.username}:***@${dbUrl.host}${dbUrl.pathname}`;
   console.log(`Database connected: ${redactedUrl} (host: ${dbUrl.host})`);

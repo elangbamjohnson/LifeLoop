@@ -3,6 +3,7 @@ import { items, captures, users, itemRelations } from "../../db/schema";
 import { eq, and, or } from "drizzle-orm";
 import { reminderService } from "./ReminderService";
 import { GoogleGenAI } from "@google/genai";
+import { isValidTimezone } from "../../shared/utils/timezone";
 
 export interface AIProvider {
   processCapture(captureId: string, userId: string, rawPayload: string, type: string, clientTimezone?: string): Promise<void>;
@@ -186,36 +187,61 @@ export function convertLocalWallClockToUTC(
   const minute = match[5] !== undefined ? parseInt(match[5], 10) : 0;
   const second = match[6] !== undefined ? parseInt(match[6], 10) : 0;
 
-  const wallUtc = Date.UTC(year, month - 1, day, hour, minute, second);
-  const wallDate = new Date(wallUtc);
+  const tz = isValidTimezone(userTimezone) ? userTimezone : "UTC";
+  const wallUtcMs = Date.UTC(year, month - 1, day, hour, minute, second);
 
-  // Compute offset between wall clock in userTimezone and UTC
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: userTimezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "numeric",
-    minute: "numeric",
-    second: "numeric",
-    hour12: false,
-  }).formatToParts(wallDate);
+  // Helper: compute timezone offset (in ms) at a given UTC instant.
+  // Returns offsetMs such that localMs = utcMs + offsetMs.
+  function getOffsetMs(utcMs: number): number {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "numeric",
+      minute: "numeric",
+      second: "numeric",
+      hour12: false,
+    }).formatToParts(new Date(utcMs));
 
-  let tzYear = year, tzMonth = month, tzDay = day, tzHour = hour, tzMin = minute, tzSec = second;
-  for (const p of parts) {
-    if (p.type === "year") tzYear = parseInt(p.value, 10);
-    if (p.type === "month") tzMonth = parseInt(p.value, 10);
-    if (p.type === "day") tzDay = parseInt(p.value, 10);
-    if (p.type === "hour") tzHour = parseInt(p.value, 10);
-    if (p.type === "minute") tzMin = parseInt(p.value, 10);
-    if (p.type === "second") tzSec = parseInt(p.value, 10);
+    let y = year, mo = month, d = day, h = hour, mi = minute, s = second;
+    for (const p of parts) {
+      if (p.type === "year") y = parseInt(p.value, 10);
+      if (p.type === "month") mo = parseInt(p.value, 10);
+      if (p.type === "day") d = parseInt(p.value, 10);
+      if (p.type === "hour") h = parseInt(p.value, 10);
+      if (p.type === "minute") mi = parseInt(p.value, 10);
+      if (p.type === "second") s = parseInt(p.value, 10);
+    }
+    if (h === 24) h = 0;
+    const localMs = Date.UTC(y, mo - 1, d, h, mi, s);
+    return localMs - utcMs;
   }
-  if (tzHour === 24) tzHour = 0;
 
-  const asInTz = Date.UTC(tzYear, tzMonth - 1, tzDay, tzHour, tzMin, tzSec);
-  const offsetMs = asInTz - wallUtc;
+  // Pass 1: offset at the wall-clock-treated-as-UTC instant
+  const offset1 = getOffsetMs(wallUtcMs);
+  const utc1 = wallUtcMs - offset1;
 
-  return new Date(wallUtc - offsetMs);
+  // Pass 2: offset at the first estimate
+  const offset2 = getOffsetMs(utc1);
+
+  if (offset1 === offset2) {
+    // No DST transition — both agree
+    return new Date(utc1);
+  }
+
+  // DST transition detected: prefer the second-pass result if it round-trips
+  const utc2 = wallUtcMs - offset2;
+  const offset3 = getOffsetMs(utc2);
+
+  if (offset3 === offset2) {
+    // utc2 round-trips correctly (e.g. 03:30 EDT post-spring-forward)
+    return new Date(utc2);
+  }
+
+  // utc2 does not round-trip: gap (non-existent local time). Use first-pass result
+  // which maps to the wall clock time in the pre-transition offset (e.g. 02:30 → 07:30Z)
+  return new Date(utc1);
 }
 
 export function buildExtractionPrompt(
@@ -246,6 +272,7 @@ Deadline & Time Rules:
 - Do NOT convert to UTC or append timezone offsets (do NOT return +05:30 or -04:00 or Z). The server converts local wall-clock time to UTC in code using the user's timezone.
 - For date-only deadlines without an explicit clock time (e.g. "on Oct 5", "due next Friday", "due the 18th", "by end of month", "March 2027", "Meeting with Henderson tomorrow"), set the time component to 09:00:00 local time ("YYYY-MM-DDT09:00:00").
 - If a day-of-month is specified without a month (e.g. "due the 18th", "pay on the 5th") and that day has already passed in the current month relative to Current Date and Time, roll to that day in the NEXT month (e.g. if Current Date is September 28, "due the 18th" is October 18).
+- If the user specifies a relative day of the week without an exact date (e.g. "next Friday", "this Tuesday"), calculate the exact local date relative to Current Date and Time.
 - "hasExplicitTime": boolean; true ONLY if the user stated an explicit clock time or relative duration ("at 4:30 pm", "in 2 minutes", "tomorrow 10 am", "Gym at 6"); false for date-only ("on Oct 5", "next Friday", "the 18th", "by end of month", "March 2027", "Meeting with Henderson tomorrow"); false when unsure.
 
 User input (${type}):
@@ -294,7 +321,8 @@ export class GeminiAIProvider implements AIProvider {
     const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
     const userSettings = (user?.settings as any) || {};
     const autoRemindersEnabled = userSettings.autoReminders === true;
-    const userTimezone = clientTimezone || userSettings.timezone || "UTC";
+    const rawTz = clientTimezone || userSettings.timezone;
+    const userTimezone = isValidTimezone(rawTz) ? rawTz : "UTC";
 
     const now = new Date();
     const prompt = buildExtractionPrompt(rawPayload, type, userTimezone, now);
@@ -310,7 +338,9 @@ export class GeminiAIProvider implements AIProvider {
       });
 
       const text = response.text;
-      console.log(`[RAW MODEL RESPONSE for "${rawPayload}"]: ${text}`);
+      if (process.env.DEBUG_AI) {
+        console.log(`[RAW MODEL RESPONSE for "${rawPayload}"]: ${text}`);
+      }
       if (text) {
         const parsed = JSON.parse(text);
         if (Array.isArray(parsed.items) && parsed.items.length > 0) {
@@ -355,7 +385,8 @@ export class MockAIProvider implements AIProvider {
     const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
     const userSettings = (user?.settings as any) || {};
     const autoRemindersEnabled = userSettings.autoReminders === true;
-    const userTimezone = userSettings.timezone || "UTC";
+    const rawTz = clientTimezone || userSettings.timezone;
+    const userTimezone = isValidTimezone(rawTz) ? rawTz : "UTC";
 
     // TEST SCENARIOS (Deterministic Invalid States)
     if (rawPayload.includes("TEST_PROVIDER_ERROR")) {

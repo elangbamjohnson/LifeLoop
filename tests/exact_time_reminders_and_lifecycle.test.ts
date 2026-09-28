@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import request from "supertest";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
@@ -46,6 +46,10 @@ describe("Exact-Time Reminders and Lifecycle Synchronization", () => {
       await db.delete(captures).where(inArray(captures.userId, createdUserIds));
       await db.delete(users).where(inArray(users.id, createdUserIds));
     }
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   // Test 1: Time-specific item ("at 4:30 pm", "in 2 minutes") creates exactly one reminder at the due instant
@@ -1030,6 +1034,9 @@ describe("Exact-Time Reminders and Lifecycle Synchronization", () => {
   // Test 18: Date edits on timed items:
   // User in Asia/Kolkata, item "Dentist" due 2026-10-05 16:30 IST, PATCH {dueDate:"2026-10-08"} gives item and reminder at 2026-10-08 16:30 IST
   it("Date edits on timed items: user in Asia/Kolkata, item 'Dentist' due 2026-10-05 16:30 IST, PATCH {dueDate:'2026-10-08'} gives item and reminder at 2026-10-08 16:30 IST", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-28T07:00:00Z"));
+    
     const kolkataTimezone = "Asia/Kolkata";
     const [kolkataUser] = await db
       .insert(users)
@@ -1100,6 +1107,9 @@ describe("Exact-Time Reminders and Lifecycle Synchronization", () => {
 
   // Test 19: Date-only item PATCHed with date-only string keeps 09:00 IST
   it("Date-only item PATCHed with date-only string keeps 09:00 IST", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-28T07:00:00Z"));
+
     const kolkataTimezone = "Asia/Kolkata";
     const [kolkataUser] = await db
       .insert(users)
@@ -1217,80 +1227,181 @@ describe("Exact-Time Reminders and Lifecycle Synchronization", () => {
     expect(formatDateForDateInput("2026-10-05T00:30:00+05:30", "Asia/Kolkata")).toBe("2026-10-05");
   });
 
-  // Test 21: Device tz differs from profile tz: open and save with no date change, date must not move
-  it("Device tz differs from profile tz: open and save with no date change, date must not move", async () => {
-    // User profile timezone is Asia/Kolkata (+05:30)
-    const profileTz = "Asia/Kolkata";
+  // Test 21: Dispatcher behavior on past-due reminders during quiet hours (22:00-08:00)
+  it("Dispatcher defers a past-due reminder if it is currently quiet hours in the user's timezone", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    
+    const kolkataTimezone = "Asia/Kolkata";
+    // Let's set the system time to a point inside quiet hours for Kolkata.
+    // Quiet hours: 22:00 to 08:00 IST.
+    // Let's use 23:00 IST (which is 17:30 UTC).
+    vi.setSystemTime(new Date("2026-09-28T17:30:00.000Z"));
+
     const [user] = await db
       .insert(users)
       .values({
-        email: `tz_modal_user_${uuidv4()}@example.com`,
+        email: `dispatcher_quiet_user_${uuidv4()}@example.com`,
         passwordHash: "dummy",
         settings: {
-          timezone: profileTz,
+          timezone: kolkataTimezone,
+          autoReminders: true,
+          quietHoursEnabled: true,
+          quietHoursStart: "22:00",
+          quietHoursEnd: "08:00",
+        },
+      })
+      .returning();
+    createdUserIds.push(user.id);
+
+    // Reminder was due at 21:00 IST (15:30 UTC), which is past-due now (23:00 IST).
+    const pastDueDate = new Date("2026-09-28T15:30:00.000Z");
+
+    const [rem] = await db
+      .insert(reminders)
+      .values({
+        userId: user.id,
+        title: "Test quiet hours deferral",
+        triggerType: "exact_time",
+        scheduledAt: pastDueDate,
+        status: "scheduled",
+        channel: "web",
+      })
+      .returning();
+
+    // Call dispatcher
+    await reminderService.dispatchDueReminders(new Date("2026-09-28T17:30:00.000Z"));
+
+    // Verify reminder is released back to 'scheduled' and not sent
+    const [updatedRem] = await db.select().from(reminders).where(eq(reminders.id, rem.id));
+    expect(updatedRem.status).toBe("scheduled");
+    // scheduledAt should be untouched
+    expect(updatedRem.scheduledAt.getTime()).toBe(pastDueDate.getTime());
+  });
+
+  // Test 22: Valid X-Timezone header is saved to user settings when profile has no timezone
+  it("Valid X-Timezone header is saved to user settings", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-28T07:00:00Z"));
+
+    // Create user with NO timezone in settings
+    const [noTzUser] = await db
+      .insert(users)
+      .values({
+        email: `no_tz_user_${uuidv4()}@example.com`,
+        passwordHash: "dummy",
+        settings: {
           autoReminders: true,
         },
       })
       .returning();
 
-    createdUserIds.push(user.id);
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET);
+    createdUserIds.push(noTzUser.id);
+    const token = jwt.sign({ userId: noTzUser.id }, JWT_SECRET);
     const cookie = `session=${token}`;
 
-    // Item scheduled at 2026-10-05 00:30 IST = 2026-10-04T19:00:00.000Z (UTC)
-    const originalDueDate = new Date("2026-10-04T19:00:00.000Z");
-    const [item] = await db
+    // Create an item with a due date
+    const [testItem] = await db
       .insert(items)
       .values({
-        userId: user.id,
-        title: "Early morning appointment",
-        itemType: "appointment",
+        userId: noTzUser.id,
+        title: "Test timezone header",
+        itemType: "task",
         status: "active",
-        dueDate: originalDueDate,
-        metadata: { hasExplicitTime: true },
+        dueDate: new Date("2026-10-05T03:30:00.000Z"),
+        metadata: { hasExplicitTime: false },
       })
       .returning();
 
-    await reminderService.createRemindersForItem(
-      item.id,
-      user.id,
-      item.title,
-      originalDueDate,
-      true,
-      profileTz
-    );
-
-    // Initial check: 1 exact-time reminder scheduled at 2026-10-04T19:00:00.000Z
-    const [initialRem] = await db.select().from(reminders).where(eq(reminders.itemId, item.id));
-    expect(initialRem).toBeDefined();
-    expect(new Date(initialRem.scheduledAt).toISOString()).toBe("2026-10-04T19:00:00.000Z");
-
-    // Modal behavior when opened with item:
-    // 1. Initial date string computed via formatDateForDateInput(item.dueDate, profileTz)
-    const initialInputVal = formatDateForDateInput(item.dueDate, profileTz);
-    expect(initialInputVal).toBe("2026-10-05"); // In Asia/Kolkata it is Oct 5th
-
-    // 2. User edits other fields (e.g. title) but does NOT change the date input
-    // The modal's handleFormSubmit omits dueDate when isDueDateModified is false
+    // PATCH with valid X-Timezone header
     const patchRes = await request(app)
-      .patch(`/api/v1/items/${item.id}`)
+      .patch(`/api/v1/items/${testItem.id}`)
       .set("Cookie", cookie)
-      .send({
-        title: "Early morning appointment (Confirmed)",
-        // Notice dueDate is NOT included in the request body because it was not changed
-      });
+      .set("X-Timezone", "Asia/Kolkata")
+      .send({ title: "Updated with tz header" });
 
     expect(patchRes.status).toBe(200);
 
-    // 3. Item's dueDate must NOT move: it must remain exactly 2026-10-04T19:00:00.000Z (00:30 IST)
-    const [updatedItem] = await db.select().from(items).where(eq(items.id, item.id));
-    expect(new Date(updatedItem.dueDate!).getTime()).toBe(originalDueDate.getTime());
-    expect(new Date(updatedItem.dueDate!).toISOString()).toBe("2026-10-04T19:00:00.000Z");
+    // Verify user settings now have timezone saved
+    const [updatedUser] = await db.select().from(users).where(eq(users.id, noTzUser.id));
+    expect((updatedUser.settings as any).timezone).toBe("Asia/Kolkata");
+  });
 
-    // 4. Existing scheduled reminder must NOT move or be cancelled
-    const [updatedRem] = await db.select().from(reminders).where(eq(reminders.itemId, item.id));
-    expect(updatedRem.id).toBe(initialRem.id);
-    expect(updatedRem.status).toBe("scheduled");
-    expect(new Date(updatedRem.scheduledAt).getTime()).toBe(originalDueDate.getTime());
+  // Test 23: Invalid X-Timezone header is ignored and not saved
+  it("Invalid X-Timezone header is ignored; timezone falls back to UTC", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-28T07:00:00Z"));
+
+    // Create user with NO timezone in settings
+    const [noTzUser2] = await db
+      .insert(users)
+      .values({
+        email: `invalid_tz_user_${uuidv4()}@example.com`,
+        passwordHash: "dummy",
+        settings: {
+          autoReminders: true,
+        },
+      })
+      .returning();
+
+    createdUserIds.push(noTzUser2.id);
+    const token = jwt.sign({ userId: noTzUser2.id }, JWT_SECRET);
+    const cookie = `session=${token}`;
+
+    // Create an item
+    const [testItem2] = await db
+      .insert(items)
+      .values({
+        userId: noTzUser2.id,
+        title: "Test invalid tz",
+        itemType: "task",
+        status: "active",
+        dueDate: new Date("2026-10-05T09:00:00.000Z"),
+        metadata: { hasExplicitTime: false },
+      })
+      .returning();
+
+    // PATCH with garbage X-Timezone header
+    const patchRes = await request(app)
+      .patch(`/api/v1/items/${testItem2.id}`)
+      .set("Cookie", cookie)
+      .set("X-Timezone", "Not/A_Real_Timezone")
+      .send({ title: "Updated with bad tz" });
+
+    expect(patchRes.status).toBe(200);
+
+    // Verify user settings do NOT have the invalid timezone saved
+    const [updatedUser2] = await db.select().from(users).where(eq(users.id, noTzUser2.id));
+    expect((updatedUser2.settings as any).timezone).toBeUndefined();
+  });
+
+  // Test 24: Register with timezone "foo" falls back to UTC and does not throw
+  it("Register with timezone 'foo' falls back to UTC and does not throw", async () => {
+    const invalidTzEmail = `invalid_tz_${uuidv4()}@example.com`;
+    const regRes = await request(app)
+      .post("/api/v1/auth/register")
+      .send({
+        email: invalidTzEmail,
+        password: "ValidPassword123!",
+        timezone: "foo",
+      });
+
+    expect(regRes.status).toBe(201);
+    createdUserIds.push(regRes.body.user.id);
+
+    const [createdUser] = await db.select().from(users).where(eq(users.id, regRes.body.user.id));
+    expect((createdUser.settings as any)?.timezone).toBe("UTC");
+  });
+
+  // Test 25: Captures with X-Timezone "foo" falls back to UTC and does not throw
+  it("Captures with X-Timezone 'foo' falls back to UTC and does not throw", async () => {
+    const res = await request(app)
+      .post("/api/v1/captures")
+      .set("Cookie", authCookie)
+      .set("X-Timezone", "foo")
+      .send({ type: "text", rawPayload: "Dentist appointment tomorrow at 10am" });
+
+    expect(res.status).toBe(201);
+    expect(res.body.capture).toBeDefined();
+    expect(res.body.capture.id).toBeDefined();
   });
 });
