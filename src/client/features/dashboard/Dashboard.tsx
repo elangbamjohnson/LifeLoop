@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { 
   Plus, 
   Settings, 
@@ -39,6 +39,7 @@ import { FamilyPage } from "../family/FamilyPage";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { useDashboardPolling, Capture } from "../../hooks/useDashboardPolling";
 import { useLiveSync } from "../../hooks/useLiveSync";
+import { useNow } from "../../hooks/useNow";
 import { getTabClientId } from "../../utils/tabId";
 
 export function Dashboard() {
@@ -262,18 +263,25 @@ export function Dashboard() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Filter items by search query
-  const filteredItems = searchQuery
-    ? items.filter(
-        (i) =>
-          i.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          i.itemType.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          JSON.stringify(i.metadata || {}).toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : items;
+  const now = useNow(30000);
 
-  // Intelligently compute Life Timeline grouping
-  const timeline: TimelineGrouping = groupItemsIntoTimeline(filteredItems, new Date());
+  // Filter items by search query (memoized to avoid re-filtering on tick)
+  const filteredItems = useMemo(() => {
+    if (!searchQuery) return items;
+    const q = searchQuery.toLowerCase();
+    return items.filter(
+      (i) =>
+        i.title.toLowerCase().includes(q) ||
+        i.itemType.toLowerCase().includes(q) ||
+        JSON.stringify(i.metadata || {}).toLowerCase().includes(q)
+    );
+  }, [items, searchQuery]);
+
+  // Intelligently compute Life Timeline grouping with live reference time (memoized)
+  const timeline: TimelineGrouping = useMemo(
+    () => groupItemsIntoTimeline(filteredItems, now),
+    [filteredItems, now]
+  );
 
   // Capture submission handler
   const handleCaptureSubmit = async (data: { type: string; payload: string | File }) => {
@@ -558,7 +566,7 @@ export function Dashboard() {
   };
 
   const isMoreActive = activeTab === "graph" || activeTab === "family";
-  const formattedDate = new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  const formattedDate = now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 
   return (
     <div className="min-h-screen bg-[#FDFBF7] dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7]">
@@ -1077,8 +1085,8 @@ export function Dashboard() {
 
                   <div className="flex gap-3 overflow-x-auto no-scrollbar py-1">
                     {reminderItems.map((item) => {
-                      const isOverdue = item.badgeVariant === "urgent" || (item.dueDate && new Date(item.dueDate).getTime() < Date.now());
-                      const isToday = !isOverdue && item.dueDate && new Date(item.dueDate).toDateString() === new Date().toDateString();
+                      const isOverdue = item.badgeVariant === "urgent" || (item.dueDate && new Date(item.dueDate).getTime() <= now.getTime());
+                      const isToday = !isOverdue && item.dueDate && new Date(item.dueDate).toDateString() === now.toDateString();
                       return (
                         <div
                           key={`carousel-${item.id}`}
