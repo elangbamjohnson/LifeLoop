@@ -360,7 +360,7 @@ export class GeminiAIProvider implements AIProvider {
         return;
       }
       console.warn(`[Gemini AI] Live LLM returned no items. Falling back to heuristic mock extraction with explicit warning.`);
-      return this.mockFallback.processCapture(captureId, userId, rawPayload, type);
+      return this.mockFallback.processCapture(captureId, userId, rawPayload, type, userTimezone);
     }
 
     await saveExtractedItems(userId, captureId, itemsList, rawPayload, autoRemindersEnabled, userTimezone);
