@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import request from "supertest";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
@@ -7,6 +7,7 @@ import { users, items, reminders, captures } from "../src/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { reminderService } from "../src/server/services/ReminderService";
 import { saveExtractedItems } from "../src/server/services/AIProvider";
+import { eventBus } from "../src/server/services/EventBus";
 import { createTestApp } from "./setup";
 
 const app = createTestApp();
@@ -182,7 +183,7 @@ describe("Exact-Time Reminders and Lifecycle Synchronization", () => {
 
     const [createdItem] = await db.select().from(items).where(eq(items.captureId, capture.id));
     expect(createdItem).toBeDefined();
-    expect(createdItem.metadata?.hasExplicitTime).toBe(false);
+    expect((createdItem.metadata as any)?.hasExplicitTime).toBe(false);
 
     const itemReminders = await db
       .select()
@@ -718,5 +719,310 @@ describe("Exact-Time Reminders and Lifecycle Synchronization", () => {
     for (const r of ladderReminders) {
       expect(r.triggerType).toBe("relative_to_deadline");
     }
+  });
+
+  // Test 14: Exact-time reminder already 'sent', edit due date to the future:
+  // exactly one new scheduled exact_time reminder, and the sent one untouched.
+  it("Exact-time reminder already 'sent', edit due date to the future: exactly one new scheduled exact_time reminder, and the sent one untouched", async () => {
+    const initialDueDate = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours in future
+    const [exactItem] = await db
+      .insert(items)
+      .values({
+        userId: testUserId,
+        title: "Exact Time Item for Sent Reschedule Test",
+        itemType: "task",
+        status: "active",
+        dueDate: initialDueDate,
+        metadata: { hasExplicitTime: true },
+      })
+      .returning();
+
+    // 1. Create original reminder
+    const created = await reminderService.createRemindersForItem(
+      exactItem.id,
+      testUserId,
+      exactItem.title,
+      initialDueDate,
+      true,
+      "UTC"
+    );
+    expect(created.length).toBe(1);
+    const sentReminderId = created[0].id;
+
+    // 2. Mark original reminder as 'sent'
+    await db
+      .update(reminders)
+      .set({ status: "sent", sentAt: new Date() })
+      .where(eq(reminders.id, sentReminderId));
+
+    // Verify it is 'sent'
+    const [sentRemBefore] = await db.select().from(reminders).where(eq(reminders.id, sentReminderId));
+    expect(sentRemBefore.status).toBe("sent");
+
+    // 3. Edit due date to a new future date
+    const newDueDate = new Date(Date.now() + 6 * 60 * 60 * 1000); // 6 hours in future
+    const patchRes = await request(app)
+      .patch(`/api/v1/items/${exactItem.id}`)
+      .set("Cookie", authCookie)
+      .send({
+        dueDate: newDueDate.toISOString(),
+      });
+
+    expect(patchRes.status).toBe(200);
+
+    // 4. Assert:
+    // a) The sent reminder is UNTOUCHED
+    const [sentRemAfter] = await db.select().from(reminders).where(eq(reminders.id, sentReminderId));
+    expect(sentRemAfter.status).toBe("sent");
+    expect(Math.abs(new Date(sentRemAfter.scheduledAt).getTime() - initialDueDate.getTime())).toBeLessThan(1000);
+
+    // b) Exactly one NEW scheduled exact_time reminder was created for new due date
+    const scheduledReminders = await db
+      .select()
+      .from(reminders)
+      .where(and(eq(reminders.itemId, exactItem.id), eq(reminders.status, "scheduled")));
+    expect(scheduledReminders.length).toBe(1);
+    expect(scheduledReminders[0].id).not.toBe(sentReminderId);
+    expect(scheduledReminders[0].triggerType).toBe("exact_time");
+    expect(Math.abs(new Date(scheduledReminders[0].scheduledAt).getTime() - newDueDate.getTime())).toBeLessThan(1000);
+
+    // c) Total reminders for item = exactly 2 (1 sent, 1 scheduled)
+    const allItemReminders = await db.select().from(reminders).where(eq(reminders.itemId, exactItem.id));
+    expect(allItemReminders.length).toBe(2);
+  });
+
+  // Test 15: Ladder with the -30 reminder 'sent', edit the due date:
+  // new ladder created for the offsets that are still in the future.
+  it("Ladder with the -30 reminder 'sent', edit the due date: new ladder created for the offsets that are still in the future", async () => {
+    // Initial due date is 45 days in future (so all offsets -30, -7, -1, 0 are in future)
+    const initialDueDate = new Date(Date.now() + 45 * 24 * 60 * 60 * 1000);
+    const [ladderItem] = await db
+      .insert(items)
+      .values({
+        userId: testUserId,
+        title: "Ladder Item for Sent Reschedule Test",
+        itemType: "task",
+        status: "active",
+        dueDate: initialDueDate,
+        metadata: { hasExplicitTime: false },
+      })
+      .returning();
+
+    // 1. Create initial ladder
+    const initialLadder = await reminderService.createRemindersForItem(
+      ladderItem.id,
+      testUserId,
+      ladderItem.title,
+      initialDueDate,
+      false,
+      "UTC"
+    );
+    expect(initialLadder.length).toBe(4);
+
+    // 2. Find the -30 offset reminder and mark it 'sent'
+    const rem30 = initialLadder.find((r: any) => r.relativeOffsetDays === -30);
+    expect(rem30).toBeDefined();
+    await db
+      .update(reminders)
+      .set({ status: "sent", sentAt: new Date() })
+      .where(eq(reminders.id, rem30!.id));
+
+    // 3. Edit due date to a new date further in the future (e.g. 70 days)
+    const newDueDate = new Date(Date.now() + 70 * 24 * 60 * 60 * 1000);
+    const patchRes = await request(app)
+      .patch(`/api/v1/items/${ladderItem.id}`)
+      .set("Cookie", authCookie)
+      .send({
+        dueDate: newDueDate.toISOString(),
+      });
+
+    expect(patchRes.status).toBe(200);
+
+    // 4. Assert:
+    // a) The old -30 reminder remains 'sent'
+    const [sentRemAfter] = await db.select().from(reminders).where(eq(reminders.id, rem30!.id));
+    expect(sentRemAfter.status).toBe("sent");
+
+    // b) The other initial reminders (-7, -1, 0) were cancelled
+    const otherInitialIds = initialLadder.filter((r: any) => r.id !== rem30!.id).map((r: any) => r.id);
+    const cancelledReminders = await db
+      .select()
+      .from(reminders)
+      .where(and(eq(reminders.itemId, ladderItem.id), eq(reminders.status, "cancelled")));
+    expect(cancelledReminders.length).toBe(3);
+    for (const c of cancelledReminders) {
+      expect(otherInitialIds).toContain(c.id);
+    }
+
+    // c) A new ladder is created for the offsets that are still in the future for the new date
+    const newScheduled = await db
+      .select()
+      .from(reminders)
+      .where(and(eq(reminders.itemId, ladderItem.id), eq(reminders.status, "scheduled")));
+    expect(newScheduled.length).toBe(4);
+    const newOffsets = newScheduled.map((r: any) => r.relativeOffsetDays).sort((a: number, b: number) => a - b);
+    expect(newOffsets).toEqual([-30, -7, -1, 0]);
+  });
+
+  // Test 16: Publish live-sync events only after transaction commits:
+  // force a throw inside the transaction and assert item and reminders are unchanged and no event was published.
+  it("Publish live-sync events only after transaction commits: force a throw inside transaction and assert item and reminders are unchanged and no event was published", async () => {
+    const publishSpy = vi.spyOn(eventBus, "publish");
+    publishSpy.mockClear();
+
+    const initialDueDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+    const [item] = await db
+      .insert(items)
+      .values({
+        userId: testUserId,
+        title: "Item for rollback test",
+        itemType: "task",
+        status: "active",
+        dueDate: initialDueDate,
+        metadata: { hasExplicitTime: true },
+      })
+      .returning();
+
+    // Create an initial reminder
+    await reminderService.createRemindersForItem(
+      item.id,
+      testUserId,
+      item.title,
+      initialDueDate,
+      true,
+      "UTC"
+    );
+
+    const initialReminders = await db.select().from(reminders).where(eq(reminders.itemId, item.id));
+    expect(initialReminders.length).toBe(1);
+
+    publishSpy.mockClear();
+
+    // Now execute a transaction where syncItemReminderLifecycle is invoked, but then an error is thrown
+    const eventsToPublish: Array<{ userId: string; event: any }> = [];
+    let caughtError: any;
+    try {
+      await db.transaction(async (tx) => {
+        // Perform reschedule inside transaction
+        await reminderService.syncItemReminderLifecycle(
+          item.id,
+          testUserId,
+          "reschedule",
+          {
+            newDueDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
+            hasExplicitTime: true,
+            itemTitle: "Updated title inside failing tx",
+          },
+          tx,
+          eventsToPublish
+        );
+
+        // Force a throw inside the transaction before commit
+        throw new Error("Forced transaction failure for test");
+      });
+    } catch (err) {
+      caughtError = err;
+    }
+
+    expect(caughtError).toBeDefined();
+    expect(caughtError.message).toBe("Forced transaction failure for test");
+
+    // Since the transaction aborted and was not committed:
+    // 1. eventBus.publish was NOT called for any reminder event during that transaction
+    const reminderPublishCalls = publishSpy.mock.calls.filter(
+      (call) => call[1]?.entity === "reminder" && call[0] === testUserId
+    );
+    expect(reminderPublishCalls.length).toBe(0);
+
+    // 2. Reminders in DB are unchanged (the original 1 reminder is still scheduled, no cancelled status, no new reminder)
+    const remindersAfter = await db.select().from(reminders).where(eq(reminders.itemId, item.id));
+    expect(remindersAfter.length).toBe(1);
+    expect(remindersAfter[0].id).toBe(initialReminders[0].id);
+    expect(remindersAfter[0].status).toBe("scheduled");
+    expect(Math.abs(new Date(remindersAfter[0].scheduledAt).getTime() - initialDueDate.getTime())).toBeLessThan(1000);
+
+    publishSpy.mockRestore();
+  });
+
+  // Test 17: Serialize concurrent runs:
+  // two concurrent calls (Promise.all) for the same item produce one set of reminders.
+  it("Serialize concurrent runs: two concurrent calls (Promise.all) for the same item produce one set of reminders", async () => {
+    const dueDate = new Date(Date.now() + 4 * 60 * 60 * 1000); // 4 hours in future
+    const [item] = await db
+      .insert(items)
+      .values({
+        userId: testUserId,
+        title: "Concurrent Exact-Time Test Item",
+        itemType: "task",
+        status: "active",
+        dueDate,
+        metadata: { hasExplicitTime: true },
+      })
+      .returning();
+
+    // Fire two createRemindersForItem calls simultaneously for the same item
+    await Promise.all([
+      reminderService.createRemindersForItem(
+        item.id,
+        testUserId,
+        item.title,
+        dueDate,
+        true,
+        "UTC"
+      ),
+      reminderService.createRemindersForItem(
+        item.id,
+        testUserId,
+        item.title,
+        dueDate,
+        true,
+        "UTC"
+      ),
+    ]);
+
+    // Assert that exactly ONE reminder exists in the database for this item
+    const itemReminders = await db.select().from(reminders).where(eq(reminders.itemId, item.id));
+    expect(itemReminders.length).toBe(1);
+    expect(itemReminders[0].status).toBe("scheduled");
+    expect(itemReminders[0].triggerType).toBe("exact_time");
+
+    // Also test date-only concurrency: two concurrent calls for date-only item
+    const dateOnlyDueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const [dateItem] = await db
+      .insert(items)
+      .values({
+        userId: testUserId,
+        title: "Concurrent Date-Only Test Item",
+        itemType: "task",
+        status: "active",
+        dueDate: dateOnlyDueDate,
+        metadata: { hasExplicitTime: false },
+      })
+      .returning();
+
+    await Promise.all([
+      reminderService.createRemindersForItem(
+        dateItem.id,
+        testUserId,
+        dateItem.title,
+        dateOnlyDueDate,
+        false,
+        "UTC"
+      ),
+      reminderService.createRemindersForItem(
+        dateItem.id,
+        testUserId,
+        dateItem.title,
+        dateOnlyDueDate,
+        false,
+        "UTC"
+      ),
+    ]);
+
+    // Date-only offsets [-30, -7, -1, 0] should produce exactly 4 reminders (one ladder), not 8
+    const dateItemReminders = await db.select().from(reminders).where(eq(reminders.itemId, dateItem.id));
+    expect(dateItemReminders.length).toBe(4);
+    const offsets = dateItemReminders.map((r: any) => r.relativeOffsetDays).sort((a: number, b: number) => a - b);
+    expect(offsets).toEqual([-30, -7, -1, 0]);
   });
 });

@@ -230,6 +230,7 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
       };
     }
 
+    const eventsToPublish: Array<{ userId: string; event: any }> = [];
     const updatedItem = await db.transaction(async (tx) => {
       const [updated] = await tx
         .update(items)
@@ -248,20 +249,25 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
             hasExplicitTime: resolvedHasExplicitTime,
             itemTitle: updated.title,
           },
-          tx
+          tx,
+          eventsToPublish
         );
       }
 
       // If completed or reopened, adjust reminders via lifecycle sync
       if (status === "completed") {
-        await reminderService.syncItemReminderLifecycle(id, req.userId!, "complete", undefined, tx);
+        await reminderService.syncItemReminderLifecycle(id, req.userId!, "complete", undefined, tx, eventsToPublish);
       } else if (status === "active") {
-        await reminderService.syncItemReminderLifecycle(id, req.userId!, "reopen", undefined, tx);
+        await reminderService.syncItemReminderLifecycle(id, req.userId!, "reopen", undefined, tx, eventsToPublish);
       }
 
       return updated;
     });
 
+    // POST-COMMIT: Publish collected events
+    for (const { userId, event } of eventsToPublish) {
+      eventBus.publish(userId, event);
+    }
     eventBus.publish(req.userId!, {
       type: "changed",
       entity: "item",
@@ -351,9 +357,10 @@ itemsRouter.delete("/:id", requireAuth, async (req: AuthenticatedRequest, res, n
     }
     
     // Wrap lifecycle sync and item delete in one db.transaction
+    const eventsToPublish: Array<{ userId: string; event: any }> = [];
     const deletedItem = await db.transaction(async (tx) => {
       // Sync reminder lifecycle before deleting item (cancels pending reminders, leaves sent alone, detaches itemId)
-      await reminderService.syncItemReminderLifecycle(id, req.userId!, "delete", undefined, tx);
+      await reminderService.syncItemReminderLifecycle(id, req.userId!, "delete", undefined, tx, eventsToPublish);
 
       const [deleted] = await tx
         .delete(items)
@@ -367,6 +374,10 @@ itemsRouter.delete("/:id", requireAuth, async (req: AuthenticatedRequest, res, n
       return res.status(404).json({ error: "Item not found" });
     }
 
+    // POST-COMMIT: Publish collected events
+    for (const { userId, event } of eventsToPublish) {
+      eventBus.publish(userId, event);
+    }
     eventBus.publish(req.userId!, {
       type: "changed",
       entity: "item",

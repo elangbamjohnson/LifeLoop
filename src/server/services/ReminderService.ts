@@ -218,9 +218,10 @@ export class ReminderService {
     offsets: number[] = [-30, -7, -1, 0],
     channel: "web" | "ios" | "android" | "email" = "web",
     timezone: string = "UTC",
-    tx?: any
+    tx?: any,
+    eventsCollector?: Array<{ userId: string; event: any }>
   ) {
-    const execute = async (client: any) => {
+    const execute = async (client: any, events: Array<{ userId: string; event: any }>) => {
       const created = [];
       const now = new Date();
 
@@ -229,13 +230,14 @@ export class ReminderService {
         
         // Only schedule future or near-future reminders
         if (scheduledAt.getTime() > now.getTime() - 24 * 60 * 60 * 1000) {
-          // Idempotency check: don't create duplicate if active, dispatching, or sent reminder for this offset exists
-          const [existing] = await client
+          // Idempotency check: dedupe on (itemId, triggerType="relative_to_deadline", relativeOffsetDays=offset, scheduledAt)
+          const existing = await client
             .select()
             .from(reminders)
             .where(
               and(
                 eq(reminders.itemId, itemId),
+                eq(reminders.triggerType, "relative_to_deadline"),
                 eq(reminders.relativeOffsetDays, offset),
                 or(
                   eq(reminders.status, "scheduled"),
@@ -244,10 +246,15 @@ export class ReminderService {
                   eq(reminders.status, "sent")
                 )
               )
-            )
-            .limit(1);
+            );
 
-          if (existing) continue;
+          const duplicate = existing.find(
+            (r: any) =>
+              ((r.metadata as any)?.autoCreated === true || !(r.metadata as any)?.manual) &&
+              Math.abs(new Date(r.scheduledAt).getTime() - scheduledAt.getTime()) < 1000
+          );
+
+          if (duplicate) continue;
 
           let label = "Due today";
           if (offset === -1) label = "Due tomorrow (1 day before)";
@@ -273,10 +280,13 @@ export class ReminderService {
       }
 
       if (created.length > 0) {
-        eventBus.publish(userId, {
-          type: "changed",
-          entity: "reminder",
-          at: new Date().toISOString(),
+        events.push({
+          userId,
+          event: {
+            type: "changed",
+            entity: "reminder",
+            at: new Date().toISOString(),
+          },
         });
       }
 
@@ -284,9 +294,14 @@ export class ReminderService {
     };
 
     if (tx) {
-      return execute(tx);
+      return execute(tx, eventsCollector || []);
     } else {
-      return db.transaction(async (newTx) => execute(newTx));
+      const localEvents: Array<{ userId: string; event: any }> = [];
+      const result = await db.transaction(async (newTx) => execute(newTx, localEvents));
+      for (const e of localEvents) {
+        eventBus.publish(e.userId, e.event);
+      }
+      return result;
     }
   }
 
@@ -294,7 +309,8 @@ export class ReminderService {
    * Creates reminders for an item obeying exact-time vs date-only rules:
    * Rule 2 (hasExplicitTime): exactly one reminder at due instant if not >60s past.
    * Rule 3 (date-only): ladder offsets [-30, -7, -1, 0] at 9:00 AM local time.
-   * Rule 6 (Idempotency): wrapped in a transaction; includes 'sent' reminders so reprocessing never creates duplicates.
+   * Rule 4 (Serialization): locks item row (FOR UPDATE) at start of transaction.
+   * Rule 6 (Idempotency): wrapped in a transaction; dedupes on (itemId, triggerType, scheduledAt/offset).
    */
   async createRemindersForItem(
     itemId: string,
@@ -303,38 +319,49 @@ export class ReminderService {
     dueDate: Date,
     hasExplicitTime: boolean,
     timezone: string = "UTC",
-    tx?: any
+    tx?: any,
+    eventsCollector?: Array<{ userId: string; event: any }>
   ) {
-    const execute = async (client: any) => {
-      // Idempotency: check if any active/pending or sent reminder already exists for this item
-      const existing = await client
-        .select()
-        .from(reminders)
-        .where(
-          and(
-            eq(reminders.itemId, itemId),
-            or(
-              eq(reminders.status, "scheduled"),
-              eq(reminders.status, "snoozed"),
-              eq(reminders.status, "dispatching"),
-              eq(reminders.status, "sent")
-            )
-          )
-        );
-
-      const existingAuto = existing.filter(
-        (r: any) => (r.metadata as any)?.autoCreated === true || !(r.metadata as any)?.manual
-      );
-
-      if (existingAuto.length > 0) {
-        return existingAuto;
-      }
+    const execute = async (client: any, events: Array<{ userId: string; event: any }>) => {
+      // Serialize concurrent runs for the same item by locking the item row
+      await client
+        .select({ id: items.id })
+        .from(items)
+        .where(eq(items.id, itemId))
+        .for("update");
 
       if (hasExplicitTime) {
         const now = new Date();
         // If the due time is already more than 60 seconds in the past when the item is created, create nothing.
         if (dueDate.getTime() <= now.getTime() - 60 * 1000) {
           return [];
+        }
+
+        // Idempotency: dedupe on (itemId, triggerType="exact_time", scheduledAt=dueDate)
+        const existing = await client
+          .select()
+          .from(reminders)
+          .where(
+            and(
+              eq(reminders.itemId, itemId),
+              eq(reminders.triggerType, "exact_time"),
+              or(
+                eq(reminders.status, "scheduled"),
+                eq(reminders.status, "snoozed"),
+                eq(reminders.status, "dispatching"),
+                eq(reminders.status, "sent")
+              )
+            )
+          );
+
+        const duplicate = existing.find(
+          (r: any) =>
+            ((r.metadata as any)?.autoCreated === true || !(r.metadata as any)?.manual) &&
+            Math.abs(new Date(r.scheduledAt).getTime() - dueDate.getTime()) < 1000
+        );
+
+        if (duplicate) {
+          return [duplicate];
         }
 
         const [r] = await client
@@ -353,11 +380,14 @@ export class ReminderService {
           })
           .returning();
 
-        eventBus.publish(userId, {
-          type: "changed",
-          entity: "reminder",
-          id: r.id,
-          at: new Date().toISOString(),
+        events.push({
+          userId,
+          event: {
+            type: "changed",
+            entity: "reminder",
+            id: r.id,
+            at: new Date().toISOString(),
+          },
         });
 
         return [r];
@@ -370,15 +400,21 @@ export class ReminderService {
           [-30, -7, -1, 0],
           "web",
           timezone,
-          client
+          client,
+          events
         );
       }
     };
 
     if (tx) {
-      return execute(tx);
+      return execute(tx, eventsCollector || []);
     } else {
-      return db.transaction(async (newTx) => execute(newTx));
+      const localEvents: Array<{ userId: string; event: any }> = [];
+      const result = await db.transaction(async (newTx) => execute(newTx, localEvents));
+      for (const e of localEvents) {
+        eventBus.publish(e.userId, e.event);
+      }
+      return result;
     }
   }
 
@@ -399,32 +435,20 @@ export class ReminderService {
       timezone?: string;
       itemTitle?: string;
     },
-    tx?: any
+    tx?: any,
+    eventsCollector?: Array<{ userId: string; event: any }>
   ) {
-    const client = tx || db;
+    const execute = async (client: any, events: Array<{ userId: string; event: any }>) => {
+      if (action === "reopen") {
+        // Reopening a completed item does NOT resurrect cancelled reminders.
+        return;
+      }
 
-    if (action === "reopen") {
-      // Reopening a completed item does NOT resurrect cancelled reminders.
-      return;
-    }
-
-    if (action === "complete") {
-      // Set pending reminders (status 'scheduled' or 'snoozed') to 'cancelled'. Leave 'dispatching' and 'sent' alone.
-      const pending = await client
-        .select()
-        .from(reminders)
-        .where(
-          and(
-            eq(reminders.itemId, itemId),
-            eq(reminders.userId, userId),
-            or(eq(reminders.status, "scheduled"), eq(reminders.status, "snoozed"))
-          )
-        );
-
-      if (pending.length > 0) {
-        await client
-          .update(reminders)
-          .set({ status: "cancelled" })
+      if (action === "complete") {
+        // Set pending reminders (status 'scheduled' or 'snoozed') to 'cancelled'. Leave 'dispatching' and 'sent' alone.
+        const pending = await client
+          .select()
+          .from(reminders)
           .where(
             and(
               eq(reminders.itemId, itemId),
@@ -433,108 +457,142 @@ export class ReminderService {
             )
           );
 
-        for (const r of pending) {
-          eventBus.publish(userId, {
-            type: "changed",
-            entity: "reminder",
-            id: r.id,
-            at: new Date().toISOString(),
-          });
-        }
-      }
-      return;
-    }
-
-    if (action === "delete") {
-      // Cancel pending reminders, detach itemId to null and preserve audit records in metadata.
-      // Leave 'dispatching' and 'sent' alone (their status stays 'dispatching' or 'sent').
-      const allReminders = await client
-        .select()
-        .from(reminders)
-        .where(and(eq(reminders.itemId, itemId), eq(reminders.userId, userId)));
-
-      for (const r of allReminders) {
-        const isPending = r.status === "scheduled" || r.status === "snoozed";
-        const newStatus = isPending ? "cancelled" : r.status;
-        const currentMeta = (r.metadata as any) || {};
-
-        await client
-          .update(reminders)
-          .set({
-            status: newStatus,
-            itemId: null,
-            metadata: { ...currentMeta, originalItemId: itemId, deletedItemId: itemId },
-          })
-          .where(eq(reminders.id, r.id));
-
-        if (isPending) {
-          eventBus.publish(userId, {
-            type: "changed",
-            entity: "reminder",
-            id: r.id,
-            at: new Date().toISOString(),
-          });
-        }
-      }
-      return;
-    }
-
-    if (action === "reschedule") {
-      // Cancel pending auto-created reminders for that item.
-      // Reminders created manually via the API are NOT touched.
-      const itemReminders = await client
-        .select()
-        .from(reminders)
-        .where(and(eq(reminders.itemId, itemId), eq(reminders.userId, userId)));
-
-      for (const r of itemReminders) {
-        const isPending = r.status === "scheduled" || r.status === "snoozed";
-        if (!isPending) continue;
-
-        const isAuto =
-          (r.metadata as any)?.autoCreated === true ||
-          (!(r.metadata as any)?.manual && r.triggerType === "relative_to_deadline");
-
-        if (isAuto) {
+        if (pending.length > 0) {
           await client
             .update(reminders)
             .set({ status: "cancelled" })
+            .where(
+              and(
+                eq(reminders.itemId, itemId),
+                eq(reminders.userId, userId),
+                or(eq(reminders.status, "scheduled"), eq(reminders.status, "snoozed"))
+              )
+            );
+
+          for (const r of pending) {
+            events.push({
+              userId,
+              event: {
+                type: "changed",
+                entity: "reminder",
+                id: r.id,
+                at: new Date().toISOString(),
+              },
+            });
+          }
+        }
+        return;
+      }
+
+      if (action === "delete") {
+        // Cancel pending reminders, detach itemId to null and preserve audit records in metadata.
+        // Leave 'dispatching' and 'sent' alone (their status stays 'dispatching' or 'sent').
+        const allReminders = await client
+          .select()
+          .from(reminders)
+          .where(and(eq(reminders.itemId, itemId), eq(reminders.userId, userId)));
+
+        for (const r of allReminders) {
+          const isPending = r.status === "scheduled" || r.status === "snoozed";
+          const newStatus = isPending ? "cancelled" : r.status;
+          const currentMeta = (r.metadata as any) || {};
+
+          await client
+            .update(reminders)
+            .set({
+              status: newStatus,
+              itemId: null,
+              metadata: { ...currentMeta, originalItemId: itemId, deletedItemId: itemId },
+            })
             .where(eq(reminders.id, r.id));
 
-          eventBus.publish(userId, {
-            type: "changed",
-            entity: "reminder",
-            id: r.id,
-            at: new Date().toISOString(),
-          });
+          if (isPending) {
+            events.push({
+              userId,
+              event: {
+                type: "changed",
+                entity: "reminder",
+                id: r.id,
+                at: new Date().toISOString(),
+              },
+            });
+          }
         }
+        return;
       }
 
-      // If a new due date is provided, create new reminders under rules 2/3
-      if (options?.newDueDate) {
-        let title = options.itemTitle;
-        if (!title) {
-          const [it] = await client.select().from(items).where(eq(items.id, itemId)).limit(1);
-          title = it?.title || "Reminder";
+      if (action === "reschedule") {
+        // Cancel pending auto-created reminders for that item.
+        // Reminders created manually via the API are NOT touched.
+        const itemReminders = await client
+          .select()
+          .from(reminders)
+          .where(and(eq(reminders.itemId, itemId), eq(reminders.userId, userId)));
+
+        for (const r of itemReminders) {
+          const isPending = r.status === "scheduled" || r.status === "snoozed";
+          if (!isPending) continue;
+
+          const isAuto =
+            (r.metadata as any)?.autoCreated === true ||
+            (!(r.metadata as any)?.manual && r.triggerType === "relative_to_deadline");
+
+          if (isAuto) {
+            await client
+              .update(reminders)
+              .set({ status: "cancelled" })
+              .where(eq(reminders.id, r.id));
+
+            events.push({
+              userId,
+              event: {
+                type: "changed",
+                entity: "reminder",
+                id: r.id,
+                at: new Date().toISOString(),
+              },
+            });
+          }
         }
 
-        let timezone = options.timezone;
-        if (!timezone) {
-          const [user] = await client.select().from(users).where(eq(users.id, userId)).limit(1);
-          timezone = (user?.settings as any)?.timezone || "UTC";
-        }
+        // If a new due date is provided, create new reminders under rules 2/3
+        if (options?.newDueDate) {
+          let title = options.itemTitle;
+          if (!title) {
+            const [it] = await client.select().from(items).where(eq(items.id, itemId)).limit(1);
+            title = it?.title || "Reminder";
+          }
 
-        await this.createRemindersForItem(
-          itemId,
-          userId,
-          title,
-          options.newDueDate,
-          options.hasExplicitTime ?? false,
-          timezone,
-          client
-        );
+          let timezone = options.timezone;
+          if (!timezone) {
+            const [user] = await client.select().from(users).where(eq(users.id, userId)).limit(1);
+            timezone = (user?.settings as any)?.timezone || "UTC";
+          }
+
+          await this.createRemindersForItem(
+            itemId,
+            userId,
+            title,
+            options.newDueDate,
+            options.hasExplicitTime ?? false,
+            timezone,
+            client,
+            events
+          );
+        }
+        return;
       }
-      return;
+    };
+
+    if (tx) {
+      return execute(tx, eventsCollector || []);
+    } else {
+      const localEvents: Array<{ userId: string; event: any }> = [];
+      const result = await db.transaction(async (newTx) => execute(newTx, localEvents));
+      for (const e of localEvents) {
+        eventBus.publish(e.userId, e.event);
+      }
+      return result;
     }
   }
 
@@ -613,19 +671,29 @@ export class ReminderService {
    * Completes an item and synchronizes reminders via syncItemReminderLifecycle.
    */
   async completeItem(itemId: string, userId: string, completed: boolean = true) {
-    const [updatedItem] = await db
-      .update(items)
-      .set({
-        status: completed ? "completed" : "active",
-        completedAt: completed ? new Date() : null,
-      })
-      .where(and(eq(items.id, itemId), eq(items.userId, userId)))
-      .returning();
+    const events: Array<{ userId: string; event: any }> = [];
+    const updatedItem = await db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(items)
+        .set({
+          status: completed ? "completed" : "active",
+          completedAt: completed ? new Date() : null,
+        })
+        .where(and(eq(items.id, itemId), eq(items.userId, userId)))
+        .returning();
+
+      if (!updated) return undefined;
+
+      await this.syncItemReminderLifecycle(itemId, userId, completed ? "complete" : "reopen", undefined, tx, events);
+
+      return updated;
+    });
 
     if (!updatedItem) return undefined;
 
-    await this.syncItemReminderLifecycle(itemId, userId, completed ? "complete" : "reopen");
-
+    for (const e of events) {
+      eventBus.publish(e.userId, e.event);
+    }
     eventBus.publish(userId, {
       type: "changed",
       entity: "item",
