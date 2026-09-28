@@ -32,7 +32,7 @@ interface ItemCardProps {
   onConfirmAI?: (id: string) => void;
 }
 
-export const ItemCard: React.FC<ItemCardProps> = ({
+export const ItemCard: React.FC<ItemCardProps> = React.memo(({
   item,
   onToggleComplete,
   onSnooze,
@@ -443,5 +443,6 @@ export const ItemCard: React.FC<ItemCardProps> = ({
       )}
     </div>
   );
-};
+});
+
 

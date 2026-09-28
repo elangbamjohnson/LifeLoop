@@ -85,8 +85,8 @@ export function getItemBadge(item: Partial<TimelineItem>, referenceDate: Date = 
 
   const days = getDaysDifference(target, referenceDate);
 
-  if (days < 0) {
-    return { text: `Overdue by ${Math.abs(days)}d`, variant: "urgent" };
+  if (days < 0 || (days === 0 && target.getTime() <= referenceDate.getTime())) {
+    return { text: days < 0 ? `Overdue by ${Math.abs(days)}d` : "Overdue", variant: "urgent" };
   }
   if (days === 0) {
     return { text: "Due today", variant: "today" };
@@ -149,7 +149,7 @@ export function groupItemsIntoTimeline(
 
     const days = getDaysDifference(target, referenceDate);
 
-    if (days < 0) {
+    if (days < 0 || (days === 0 && target.getTime() <= referenceDate.getTime())) {
       // Overdue items demand attention! Exactly one bucket per view
       result.needsAttention.push(item);
     } else if (days === 0) {
