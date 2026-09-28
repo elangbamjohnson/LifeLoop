@@ -8,6 +8,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import { reminderService } from "../src/server/services/ReminderService";
 import { saveExtractedItems } from "../src/server/services/AIProvider";
 import { eventBus } from "../src/server/services/EventBus";
+import { formatDateForDateInput } from "../src/client/features/dashboard/ItemEditModal";
 import { createTestApp } from "./setup";
 
 const app = createTestApp();
@@ -1024,5 +1025,272 @@ describe("Exact-Time Reminders and Lifecycle Synchronization", () => {
     expect(dateItemReminders.length).toBe(4);
     const offsets = dateItemReminders.map((r: any) => r.relativeOffsetDays).sort((a: number, b: number) => a - b);
     expect(offsets).toEqual([-30, -7, -1, 0]);
+  });
+
+  // Test 18: Date edits on timed items:
+  // User in Asia/Kolkata, item "Dentist" due 2026-10-05 16:30 IST, PATCH {dueDate:"2026-10-08"} gives item and reminder at 2026-10-08 16:30 IST
+  it("Date edits on timed items: user in Asia/Kolkata, item 'Dentist' due 2026-10-05 16:30 IST, PATCH {dueDate:'2026-10-08'} gives item and reminder at 2026-10-08 16:30 IST", async () => {
+    const kolkataTimezone = "Asia/Kolkata";
+    const [kolkataUser] = await db
+      .insert(users)
+      .values({
+        email: `dentist_user_${uuidv4()}@example.com`,
+        passwordHash: "dummy",
+        settings: {
+          timezone: kolkataTimezone,
+          autoReminders: true,
+        },
+      })
+      .returning();
+
+    createdUserIds.push(kolkataUser.id);
+    const token = jwt.sign({ userId: kolkataUser.id }, JWT_SECRET);
+    const cookie = `session=${token}`;
+
+    // 2026-10-05 16:30 IST = 2026-10-05T11:00:00.000Z
+    const initialDueDate = new Date("2026-10-05T11:00:00.000Z");
+
+    const [dentistItem] = await db
+      .insert(items)
+      .values({
+        userId: kolkataUser.id,
+        title: "Dentist",
+        itemType: "appointment",
+        status: "active",
+        dueDate: initialDueDate,
+        metadata: { hasExplicitTime: true },
+      })
+      .returning();
+
+    await reminderService.createRemindersForItem(
+      dentistItem.id,
+      kolkataUser.id,
+      dentistItem.title,
+      initialDueDate,
+      true,
+      kolkataTimezone
+    );
+
+    // PATCH with date-only string "2026-10-08"
+    const patchRes = await request(app)
+      .patch(`/api/v1/items/${dentistItem.id}`)
+      .set("Cookie", cookie)
+      .send({
+        dueDate: "2026-10-08",
+      });
+
+    expect(patchRes.status).toBe(200);
+
+    // Assert: item.dueDate is 2026-10-08 16:30 IST = 2026-10-08T11:00:00.000Z
+    const [updatedItem] = await db.select().from(items).where(eq(items.id, dentistItem.id));
+    expect(updatedItem.dueDate).toBeDefined();
+    const updatedDueTime = new Date(updatedItem.dueDate!).getTime();
+    const expectedDueTime = new Date("2026-10-08T11:00:00.000Z").getTime();
+    expect(Math.abs(updatedDueTime - expectedDueTime)).toBeLessThan(1000);
+
+    // Assert: reminder is at 2026-10-08 16:30 IST
+    const scheduledReminders = await db
+      .select()
+      .from(reminders)
+      .where(and(eq(reminders.itemId, dentistItem.id), eq(reminders.status, "scheduled")));
+    expect(scheduledReminders.length).toBe(1);
+    expect(scheduledReminders[0].triggerType).toBe("exact_time");
+    expect(Math.abs(new Date(scheduledReminders[0].scheduledAt).getTime() - expectedDueTime)).toBeLessThan(1000);
+  });
+
+  // Test 19: Date-only item PATCHed with date-only string keeps 09:00 IST
+  it("Date-only item PATCHed with date-only string keeps 09:00 IST", async () => {
+    const kolkataTimezone = "Asia/Kolkata";
+    const [kolkataUser] = await db
+      .insert(users)
+      .values({
+        email: `dateonly_user_${uuidv4()}@example.com`,
+        passwordHash: "dummy",
+        settings: {
+          timezone: kolkataTimezone,
+          autoReminders: true,
+        },
+      })
+      .returning();
+
+    createdUserIds.push(kolkataUser.id);
+    const token = jwt.sign({ userId: kolkataUser.id }, JWT_SECRET);
+    const cookie = `session=${token}`;
+
+    // 2026-10-05 09:00 IST = 2026-10-05T03:30:00.000Z
+    const initialDueDate = new Date("2026-10-05T03:30:00.000Z");
+
+    const [rentItem] = await db
+      .insert(items)
+      .values({
+        userId: kolkataUser.id,
+        title: "Pay rent",
+        itemType: "payment",
+        status: "active",
+        dueDate: initialDueDate,
+        metadata: { hasExplicitTime: false },
+      })
+      .returning();
+
+    await reminderService.createRemindersForItem(
+      rentItem.id,
+      kolkataUser.id,
+      rentItem.title,
+      initialDueDate,
+      false,
+      kolkataTimezone
+    );
+
+    // PATCH with date-only string "2026-10-08"
+    const patchRes = await request(app)
+      .patch(`/api/v1/items/${rentItem.id}`)
+      .set("Cookie", cookie)
+      .send({
+        dueDate: "2026-10-08",
+      });
+
+    expect(patchRes.status).toBe(200);
+
+    // Assert: item.dueDate is 2026-10-08 09:00 IST = 2026-10-08T03:30:00.000Z
+    const [updatedItem] = await db.select().from(items).where(eq(items.id, rentItem.id));
+    const expectedDueTime = new Date("2026-10-08T03:30:00.000Z").getTime();
+    expect(Math.abs(new Date(updatedItem.dueDate!).getTime() - expectedDueTime)).toBeLessThan(1000);
+
+    // Assert: every reminder in the ladder is at 09:00 IST
+    const scheduledReminders = await db
+      .select()
+      .from(reminders)
+      .where(and(eq(reminders.itemId, rentItem.id), eq(reminders.status, "scheduled")));
+
+    expect(scheduledReminders.length).toBeGreaterThanOrEqual(1);
+
+    for (const rem of scheduledReminders) {
+      expect(rem.triggerType).toBe("relative_to_deadline");
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Kolkata",
+        hour: "numeric",
+        minute: "numeric",
+        second: "numeric",
+        hour12: false,
+      }).formatToParts(new Date(rem.scheduledAt));
+
+      const hour = parts.find((p) => p.type === "hour")?.value;
+      const minute = parts.find((p) => p.type === "minute")?.value;
+      expect(hour).toBe("09");
+      expect(minute).toBe("00");
+    }
+
+    // Explicitly assert each offset in the created ladder:
+    const offsets = scheduledReminders.map((r) => r.relativeOffsetDays).sort((a: number, b: number) => a - b);
+    expect(offsets).toEqual([-7, -1, 0]);
+
+    const offsetZero = scheduledReminders.find((r) => r.relativeOffsetDays === 0);
+    expect(offsetZero).toBeDefined();
+    expect(Math.abs(new Date(offsetZero!.scheduledAt).getTime() - new Date("2026-10-08T03:30:00.000Z").getTime())).toBeLessThan(1000);
+
+    const offsetNeg1 = scheduledReminders.find((r) => r.relativeOffsetDays === -1);
+    expect(offsetNeg1).toBeDefined();
+    expect(Math.abs(new Date(offsetNeg1!.scheduledAt).getTime() - new Date("2026-10-07T03:30:00.000Z").getTime())).toBeLessThan(1000);
+
+    const offsetNeg7 = scheduledReminders.find((r) => r.relativeOffsetDays === -7);
+    expect(offsetNeg7).toBeDefined();
+    expect(Math.abs(new Date(offsetNeg7!.scheduledAt).getTime() - new Date("2026-10-01T03:30:00.000Z").getTime())).toBeLessThan(1000);
+  });
+
+  // Test 20: Modal date input formatting uses user profile timezone:
+  // formatDateForDateInput formats early morning date in profile timezone without date rollback
+  it("Modal date input formatting uses user profile timezone: formatDateForDateInput formats early morning date in profile timezone without date rollback", () => {
+    // 2026-10-05 00:30 IST is 2026-10-04 19:00 UTC
+    const d = new Date("2026-10-04T19:00:00.000Z");
+
+    // Real function imported directly from ItemEditModal
+    // When called with profile timezone Asia/Kolkata, it formats to 2026-10-05
+    const kolkataFormatted = formatDateForDateInput(d, "Asia/Kolkata");
+    expect(kolkataFormatted).toBe("2026-10-05");
+    expect(kolkataFormatted).not.toBe("2026-10-04");
+
+    // When called with profile timezone America/New_York (where 19:00 UTC is 15:00 EDT on Oct 4), it formats to 2026-10-04
+    const nyFormatted = formatDateForDateInput(d, "America/New_York");
+    expect(nyFormatted).toBe("2026-10-04");
+
+    // Also supports ISO string input
+    expect(formatDateForDateInput("2026-10-05T00:30:00+05:30", "Asia/Kolkata")).toBe("2026-10-05");
+  });
+
+  // Test 21: Device tz differs from profile tz: open and save with no date change, date must not move
+  it("Device tz differs from profile tz: open and save with no date change, date must not move", async () => {
+    // User profile timezone is Asia/Kolkata (+05:30)
+    const profileTz = "Asia/Kolkata";
+    const [user] = await db
+      .insert(users)
+      .values({
+        email: `tz_modal_user_${uuidv4()}@example.com`,
+        passwordHash: "dummy",
+        settings: {
+          timezone: profileTz,
+          autoReminders: true,
+        },
+      })
+      .returning();
+
+    createdUserIds.push(user.id);
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET);
+    const cookie = `session=${token}`;
+
+    // Item scheduled at 2026-10-05 00:30 IST = 2026-10-04T19:00:00.000Z (UTC)
+    const originalDueDate = new Date("2026-10-04T19:00:00.000Z");
+    const [item] = await db
+      .insert(items)
+      .values({
+        userId: user.id,
+        title: "Early morning appointment",
+        itemType: "appointment",
+        status: "active",
+        dueDate: originalDueDate,
+        metadata: { hasExplicitTime: true },
+      })
+      .returning();
+
+    await reminderService.createRemindersForItem(
+      item.id,
+      user.id,
+      item.title,
+      originalDueDate,
+      true,
+      profileTz
+    );
+
+    // Initial check: 1 exact-time reminder scheduled at 2026-10-04T19:00:00.000Z
+    const [initialRem] = await db.select().from(reminders).where(eq(reminders.itemId, item.id));
+    expect(initialRem).toBeDefined();
+    expect(new Date(initialRem.scheduledAt).toISOString()).toBe("2026-10-04T19:00:00.000Z");
+
+    // Modal behavior when opened with item:
+    // 1. Initial date string computed via formatDateForDateInput(item.dueDate, profileTz)
+    const initialInputVal = formatDateForDateInput(item.dueDate, profileTz);
+    expect(initialInputVal).toBe("2026-10-05"); // In Asia/Kolkata it is Oct 5th
+
+    // 2. User edits other fields (e.g. title) but does NOT change the date input
+    // The modal's handleFormSubmit omits dueDate when isDueDateModified is false
+    const patchRes = await request(app)
+      .patch(`/api/v1/items/${item.id}`)
+      .set("Cookie", cookie)
+      .send({
+        title: "Early morning appointment (Confirmed)",
+        // Notice dueDate is NOT included in the request body because it was not changed
+      });
+
+    expect(patchRes.status).toBe(200);
+
+    // 3. Item's dueDate must NOT move: it must remain exactly 2026-10-04T19:00:00.000Z (00:30 IST)
+    const [updatedItem] = await db.select().from(items).where(eq(items.id, item.id));
+    expect(new Date(updatedItem.dueDate!).getTime()).toBe(originalDueDate.getTime());
+    expect(new Date(updatedItem.dueDate!).toISOString()).toBe("2026-10-04T19:00:00.000Z");
+
+    // 4. Existing scheduled reminder must NOT move or be cancelled
+    const [updatedRem] = await db.select().from(reminders).where(eq(reminders.itemId, item.id));
+    expect(updatedRem.id).toBe(initialRem.id);
+    expect(updatedRem.status).toBe("scheduled");
+    expect(new Date(updatedRem.scheduledAt).getTime()).toBe(originalDueDate.getTime());
   });
 });

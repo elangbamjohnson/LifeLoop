@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "../../../db";
-import { items, reminders, sharedItems, familyMembers } from "../../../db/schema";
+import { items, reminders, sharedItems, familyMembers, users } from "../../../db/schema";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
 import { reminderService } from "../../services/ReminderService";
@@ -208,6 +208,57 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
       resolvedHasExplicitTime = Boolean(existingMeta.hasExplicitTime);
     }
 
+    // Determine user's timezone for date/time calculations
+    const [user] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
+    const userTimezone = (user?.settings as any)?.timezone || "UTC";
+
+    let resolvedDueDate: Date | null | undefined = undefined;
+    if (dueDate !== undefined) {
+      if (!dueDate) {
+        resolvedDueDate = null;
+      } else if (typeof dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+        const [y, m, d] = dueDate.split("-").map(Number);
+        if (resolvedHasExplicitTime && existingItem.dueDate) {
+          // Keep the item's existing local time of day in the user's timezone, change only the date
+          const existingDate = new Date(existingItem.dueDate);
+          const timeParts = new Intl.DateTimeFormat("en-US", {
+            timeZone: userTimezone,
+            hour: "numeric",
+            minute: "numeric",
+            second: "numeric",
+            hour12: false,
+          }).formatToParts(existingDate);
+
+          let hour = 9, minute = 0, second = 0;
+          for (const p of timeParts) {
+            if (p.type === "hour") hour = parseInt(p.value, 10);
+            if (p.type === "minute") minute = parseInt(p.value, 10);
+            if (p.type === "second") second = parseInt(p.value, 10);
+          }
+          if (hour === 24) hour = 0;
+
+          resolvedDueDate = reminderService.calculateScheduledDate(
+            new Date(Date.UTC(y, m - 1, d)),
+            0,
+            hour,
+            minute,
+            userTimezone
+          );
+        } else {
+          // Date-only items keep 09:00 local in user's timezone
+          resolvedDueDate = reminderService.calculateScheduledDate(
+            new Date(Date.UTC(y, m - 1, d)),
+            0,
+            9,
+            0,
+            userTimezone
+          );
+        }
+      } else {
+        resolvedDueDate = new Date(dueDate);
+      }
+    }
+
     const updatePayload: any = {};
     if (status !== undefined) updatePayload.status = status;
     if (title !== undefined) updatePayload.title = title;
@@ -216,7 +267,7 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
       updatePayload.snoozedUntil = snoozedUntil ? new Date(snoozedUntil) : null;
     }
     if (dueDate !== undefined) {
-      updatePayload.dueDate = dueDate ? new Date(dueDate) : null;
+      updatePayload.dueDate = resolvedDueDate;
     }
     if (completedAt !== undefined) {
       updatePayload.completedAt = completedAt;
@@ -245,8 +296,9 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
           req.userId!,
           "reschedule",
           {
-            newDueDate: dueDate ? new Date(dueDate) : null,
+            newDueDate: resolvedDueDate,
             hasExplicitTime: resolvedHasExplicitTime,
+            timezone: userTimezone,
             itemTitle: updated.title,
           },
           tx,

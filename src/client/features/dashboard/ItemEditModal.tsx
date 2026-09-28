@@ -7,18 +7,49 @@ interface ItemEditModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (updated: Partial<TimelineItem> & { reminderOffsets?: number[]; recurrence?: string; channel?: string }) => Promise<void>;
+  userTimezone?: string;
 }
 
-export function ItemEditModal({ item, isOpen, onClose, onSave }: ItemEditModalProps) {
+export function formatDateForDateInput(d: Date | string | null | undefined, timezone?: string): string {
+  if (!d) return "";
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return "";
+  if (timezone) {
+    try {
+      const formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone: timezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+      const parts = formatter.formatToParts(date);
+      const year = parts.find((p) => p.type === "year")?.value;
+      const month = parts.find((p) => p.type === "month")?.value;
+      const day = parts.find((p) => p.type === "day")?.value;
+      if (year && month && day) {
+        return `${year}-${month}-${day}`;
+      }
+    } catch {
+      // Fallback to local getters if timezone string is invalid
+    }
+  }
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function ItemEditModal({ item, isOpen, onClose, onSave, userTimezone }: ItemEditModalProps) {
   if (!isOpen || !item) return null;
 
   const [title, setTitle] = useState(item.title);
   const [itemType, setItemType] = useState(item.itemType || "task");
   
-  // Format initial dueDate to YYYY-MM-DD
+  // Format initial dueDate to YYYY-MM-DD in user's profile timezone
   const rawDate = item.dueDate || (item.metadata as any)?.dueDate || (item.metadata as any)?.expiryDate;
-  const initialDateStr = rawDate ? new Date(rawDate).toISOString().slice(0, 10) : "";
+  const initialDateStr = formatDateForDateInput(rawDate, userTimezone);
   const [dueDate, setDueDate] = useState(initialDateStr);
+  const [isDueDateModified, setIsDueDateModified] = useState(false);
   
   const [amount, setAmount] = useState(item.metadata?.amount?.toString() || "");
   const [currency, setCurrency] = useState(item.metadata?.currency || "INR");
@@ -34,11 +65,12 @@ export function ItemEditModal({ item, isOpen, onClose, onSave }: ItemEditModalPr
     setTitle(item.title);
     setItemType(item.itemType || "task");
     const d = item.dueDate || (item.metadata as any)?.dueDate || (item.metadata as any)?.expiryDate;
-    setDueDate(d ? new Date(d).toISOString().slice(0, 10) : "");
+    setDueDate(formatDateForDateInput(d, userTimezone));
+    setIsDueDateModified(false);
     setAmount(item.metadata?.amount?.toString() || "");
     setCurrency(item.metadata?.currency || "INR");
     setWaitingFor(item.metadata?.waitingFor || "");
-  }, [item]);
+  }, [item, userTimezone]);
 
   const toggleOffset = (offset: number) => {
     setSelectedOffsets((prev) =>
@@ -55,20 +87,25 @@ export function ItemEditModal({ item, isOpen, onClose, onSave }: ItemEditModalPr
         ...(amount ? { amount: parseFloat(amount) } : {}),
         currency,
         ...(waitingFor ? { waitingFor } : {}),
-        ...(dueDate ? { dueDate } : {}),
+        ...(isDueDateModified ? (dueDate ? { dueDate } : { dueDate: null }) : {}),
       };
 
-      await onSave({
+      const payload: Partial<TimelineItem> & { reminderOffsets?: number[]; recurrence?: string; channel?: string } = {
         id: item.id,
         title,
         itemType,
-        dueDate: dueDate ? new Date(dueDate).toISOString() : null,
         status: item.status === "pending_review" ? "active" : item.status,
         metadata: updatedMetadata,
         reminderOffsets: selectedOffsets,
         recurrence,
         channel,
-      });
+      };
+
+      if (isDueDateModified) {
+        payload.dueDate = dueDate || null;
+      }
+
+      await onSave(payload);
       onClose();
     } catch (err) {
       console.error("Failed to save item edit:", err);
@@ -148,7 +185,10 @@ export function ItemEditModal({ item, isOpen, onClose, onSave }: ItemEditModalPr
                 id="edit-duedate-input"
                 type="date"
                 value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
+                onChange={(e) => {
+                  setDueDate(e.target.value);
+                  setIsDueDateModified(true);
+                }}
                 className="w-full px-3 py-2.5 rounded-xl border border-[#E7E5E4] dark:border-[#44403C] bg-white dark:bg-[#1C1917] text-[#1C1917] dark:text-[#FDFBF7] text-sm focus:outline-none focus:ring-2 focus:ring-[#1C1917] dark:focus:ring-white"
               />
             </div>

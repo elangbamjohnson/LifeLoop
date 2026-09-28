@@ -105,8 +105,7 @@ export async function saveExtractedItems(
 
     let parsedDueDate: Date | null = null;
     if (item.dueDate) {
-      parsedDueDate = item.dueDate instanceof Date ? item.dueDate : new Date(item.dueDate);
-      if (isNaN(parsedDueDate.getTime())) parsedDueDate = null;
+      parsedDueDate = convertLocalWallClockToUTC(item.dueDate, userTimezone);
     }
 
     const [createdItem] = await db.insert(items).values({
@@ -157,6 +156,124 @@ export async function saveExtractedItems(
 /**
  * Live Google Gemini AI Provider for real natural language extraction.
  */
+export const GEMINI_MODEL = "gemini-3.5-flash-lite";
+
+export function convertLocalWallClockToUTC(
+  dateInput: string | Date | null | undefined,
+  userTimezone: string = "UTC"
+): Date | null {
+  if (!dateInput) return null;
+  if (dateInput instanceof Date) {
+    if (isNaN(dateInput.getTime())) return null;
+    return dateInput;
+  }
+
+  const str = String(dateInput).trim();
+  if (!str) return null;
+
+  // Match YYYY-MM-DD and optional THH:mm[:ss]
+  // Note: we intentionally disregard any trailing timezone offset or 'Z' returned by the model
+  const match = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!match) {
+    const fallback = new Date(str);
+    return isNaN(fallback.getTime()) ? null : fallback;
+  }
+
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+  const hour = match[4] !== undefined ? parseInt(match[4], 10) : 9;
+  const minute = match[5] !== undefined ? parseInt(match[5], 10) : 0;
+  const second = match[6] !== undefined ? parseInt(match[6], 10) : 0;
+
+  const wallUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  const wallDate = new Date(wallUtc);
+
+  // Compute offset between wall clock in userTimezone and UTC
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: userTimezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hour12: false,
+  }).formatToParts(wallDate);
+
+  let tzYear = year, tzMonth = month, tzDay = day, tzHour = hour, tzMin = minute, tzSec = second;
+  for (const p of parts) {
+    if (p.type === "year") tzYear = parseInt(p.value, 10);
+    if (p.type === "month") tzMonth = parseInt(p.value, 10);
+    if (p.type === "day") tzDay = parseInt(p.value, 10);
+    if (p.type === "hour") tzHour = parseInt(p.value, 10);
+    if (p.type === "minute") tzMin = parseInt(p.value, 10);
+    if (p.type === "second") tzSec = parseInt(p.value, 10);
+  }
+  if (tzHour === 24) tzHour = 0;
+
+  const asInTz = Date.UTC(tzYear, tzMonth - 1, tzDay, tzHour, tzMin, tzSec);
+  const offsetMs = asInTz - wallUtc;
+
+  return new Date(wallUtc - offsetMs);
+}
+
+export function buildExtractionPrompt(
+  rawPayload: string,
+  type: string = "text",
+  userTimezone: string = "UTC",
+  now: Date = new Date()
+): string {
+  const currentTimeStr = now.toLocaleString("en-US", { timeZone: userTimezone, timeZoneName: "shortOffset" });
+
+  return `You are LifeLoop, an intelligent personal life assistant.
+Extract all structured actionable items, deadlines, obligations, or entities from this user capture.
+User's Timezone: ${userTimezone}
+Current Date and Time: ${currentTimeStr} (Assume this is "now" when interpreting relative times like "today", "tomorrow", or "at 7pm").
+
+Classification Rules for itemType:
+- "document": Receipts, maintenance records, service invoices, oil changes, tire rotations, warranties, registration papers, identity docs, leases. IMPORTANT: NEVER classify a maintenance receipt, service record, or repair bill as "vehicle" or "home" entity!
+- "vehicle": ONLY the vehicle itself as an asset/entity (e.g. "I bought a Honda Civic", "2024 Honda Civic Sport car info").
+- "home": ONLY the physical property/home itself as an asset/entity (e.g. "Moved to 123 Main St", "Purchased condo").
+- "renewal": Insurance renewals, lease renewals, license renewal deadlines, subscription renewals.
+- "payment": Unpaid bills, credit card statements, due payments.
+- "waiting_for": Pending responses, expecting a callback or package or refund from someone.
+- "appointment": Doctor visits, dentist appointments, service appointments scheduled for a specific time.
+- "task": General to-dos and action items.
+
+Deadline & Time Rules:
+- Return all dates and times as LOCAL wall-clock time in the user's timezone formatted as "YYYY-MM-DDTHH:mm:ss" (without timezone offset or 'Z').
+- Do NOT convert to UTC or append timezone offsets (do NOT return +05:30 or -04:00 or Z). The server converts local wall-clock time to UTC in code using the user's timezone.
+- For date-only deadlines without an explicit clock time (e.g. "on Oct 5", "due next Friday", "due the 18th", "by end of month", "March 2027", "Meeting with Henderson tomorrow"), set the time component to 09:00:00 local time ("YYYY-MM-DDT09:00:00").
+- If a day-of-month is specified without a month (e.g. "due the 18th", "pay on the 5th") and that day has already passed in the current month relative to Current Date and Time, roll to that day in the NEXT month (e.g. if Current Date is September 28, "due the 18th" is October 18).
+- "hasExplicitTime": boolean; true ONLY if the user stated an explicit clock time or relative duration ("at 4:30 pm", "in 2 minutes", "tomorrow 10 am", "Gym at 6"); false for date-only ("on Oct 5", "next Friday", "the 18th", "by end of month", "March 2027", "Meeting with Henderson tomorrow"); false when unsure.
+
+User input (${type}):
+"${rawPayload}"
+
+Return ONLY valid JSON adhering strictly to this schema:
+{
+  "items": [
+    {
+      "title": "Clear, concise title (e.g. Geico Car Insurance Renewal, Downtown Auto Care Oil Change, Mr. Henderson Pipe Repair)",
+      "itemType": "renewal" | "payment" | "waiting_for" | "subscription" | "document" | "appointment" | "vehicle" | "home" | "task",
+      "dueDate": "Local wall-clock ISO string formatted as YYYY-MM-DDTHH:mm:ss (e.g. 2026-10-18T09:00:00 for date-only at 09:00:00 local time, or exact local time like 2026-10-05T16:30:00 when clock time is specified, NO timezone offset or Z) or null if no deadline",
+      "hasExplicitTime": false,
+      "confidenceScore": 0.95,
+      "metadata": {
+        "amount": 185.50 or null,
+        "currency": "USD" or "INR" or null,
+        "vendor": "Downtown Auto Care or null",
+        "service": "Oil change and tire rotation or null",
+        "waitingFor": "person or company name if waiting on someone, else null",
+        "policyNumber": "string or null",
+        "description": "brief context"
+      }
+    }
+  ]
+}`;
+}
+
 export class GeminiAIProvider implements AIProvider {
   private ai: GoogleGenAI;
   private mockFallback: MockAIProvider;
@@ -180,62 +297,12 @@ export class GeminiAIProvider implements AIProvider {
     const userTimezone = clientTimezone || userSettings.timezone || "UTC";
 
     const now = new Date();
-    const todayStr = new Intl.DateTimeFormat("en-CA", { 
-      timeZone: userTimezone, 
-      year: "numeric", 
-      month: "2-digit", 
-      day: "2-digit" 
-    }).format(now);
-    const currentTimeStr = now.toLocaleString("en-US", { timeZone: userTimezone, timeZoneName: "shortOffset" });
-
-    const prompt = `You are LifeLoop, an intelligent personal life assistant.
-Extract all structured actionable items, deadlines, obligations, or entities from this user capture.
-User's Timezone: ${userTimezone}
-Current Date and Time: ${currentTimeStr} (Assume this is "now" when interpreting relative times like "today", "tomorrow", or "at 7pm").
-
-Classification Rules for itemType:
-- "document": Receipts, maintenance records, service invoices, oil changes, tire rotations, warranties, registration papers, identity docs, leases. IMPORTANT: NEVER classify a maintenance receipt, service record, or repair bill as "vehicle" or "home" entity!
-- "vehicle": ONLY the vehicle itself as an asset/entity (e.g. "I bought a Honda Civic", "2024 Honda Civic Sport car info").
-- "home": ONLY the physical property/home itself as an asset/entity (e.g. "Moved to 123 Main St", "Purchased condo").
-- "renewal": Insurance renewals, lease renewals, license renewal deadlines, subscription renewals.
-- "payment": Unpaid bills, credit card statements, due payments.
-- "waiting_for": Pending responses, expecting a callback or package or refund from someone.
-- "appointment": Doctor visits, dentist appointments, service appointments scheduled for a specific time.
-- "task": General to-dos and action items.
-
-Deadline & Time Rules:
-- "dueDate": ISO 8601 string timestamp with correct timezone offset (e.g. 2026-10-15T09:00:00-04:00) or null if no deadline/due date mentioned. For date-only deadlines without an explicit clock time (e.g. "on Oct 5", "due next Friday", "due the 18th", "by end of month", "March 2027", "Meeting with Henderson tomorrow"), set the time component of dueDate to 09:00:00 in the user's timezone.
-- "hasExplicitTime": boolean; true ONLY if the user stated a clock time or a relative duration ("at 4:30 pm", "in 2 minutes", "tomorrow 10 am", "Gym at 6"); false for date-only ("on Oct 5", "next Friday", "the 18th", "by end of month", "March 2027", "Meeting with Henderson tomorrow"); false when unsure.
-
-User input (${type}):
-"${rawPayload}"
-
-Return ONLY valid JSON adhering strictly to this schema:
-{
-  "items": [
-    {
-      "title": "Clear, concise title (e.g. Geico Car Insurance Renewal, Downtown Auto Care Oil Change, Mr. Henderson Pipe Repair)",
-      "itemType": "renewal" | "payment" | "waiting_for" | "subscription" | "document" | "appointment" | "vehicle" | "home" | "task",
-      "dueDate": "ISO 8601 string timestamp with correct timezone offset (e.g. 2026-10-05T09:00:00-04:00 for date-only at 09:00:00 local time, or exact timestamp when clock time is specified) or null if no deadline",
-      "hasExplicitTime": false,
-      "confidenceScore": 0.95,
-      "metadata": {
-        "amount": 185.50 or null,
-        "currency": "USD" or null,
-        "vendor": "Downtown Auto Care or null",
-        "service": "Oil change and tire rotation or null",
-        "waitingFor": "person or company name if waiting on someone, else null",
-        "policyNumber": "string or null",
-        "description": "brief context"
-      }
-    }
-  ]
-}`;
+    const prompt = buildExtractionPrompt(rawPayload, type, userTimezone, now);
 
     let itemsList: any[] = [];
     try {
       const response = await this.ai.models.generateContent({
-        model: "gemini-3.5-flash-lite",
+        model: GEMINI_MODEL,
         contents: prompt,
         config: {
           responseMimeType: "application/json"
@@ -243,6 +310,7 @@ Return ONLY valid JSON adhering strictly to this schema:
       });
 
       const text = response.text;
+      console.log(`[RAW MODEL RESPONSE for "${rawPayload}"]: ${text}`);
       if (text) {
         const parsed = JSON.parse(text);
         if (Array.isArray(parsed.items) && parsed.items.length > 0) {

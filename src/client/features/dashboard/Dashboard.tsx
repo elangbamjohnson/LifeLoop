@@ -1615,6 +1615,7 @@ export function Dashboard() {
           onClose={() => setEditingItem(null)}
           item={editingItem}
           onSave={handleSaveItemEdit}
+          userTimezone={(user as any)?.settings?.timezone || (user as any)?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone}
         />
       )}
 
