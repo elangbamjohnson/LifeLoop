@@ -385,7 +385,7 @@ export function Dashboard() {
     try {
       const res = await fetch(`/api/v1/items/${editingItem.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", "X-Client-Id": tabId },
+        headers: { "Content-Type": "application/json", "X-Client-Id": tabId, "X-Timezone": Intl.DateTimeFormat().resolvedOptions().timeZone },
         body: JSON.stringify(updated),
       });
       if (res.ok) {
@@ -1615,6 +1615,7 @@ export function Dashboard() {
           onClose={() => setEditingItem(null)}
           item={editingItem}
           onSave={handleSaveItemEdit}
+          userTimezone={(user as any)?.settings?.timezone || (user as any)?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone}
         />
       )}
 

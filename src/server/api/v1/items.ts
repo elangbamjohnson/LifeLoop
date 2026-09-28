@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { db } from "../../../db";
-import { items, reminders, sharedItems, familyMembers } from "../../../db/schema";
+import { items, reminders, sharedItems, familyMembers, users } from "../../../db/schema";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
 import { reminderService } from "../../services/ReminderService";
 import { eventBus } from "../../services/EventBus";
 import { groupItemsIntoTimeline, TimelineItem } from "../../../shared/utils/timeline";
 import { isValidUuid, applyUuidParamValidation } from "../../middlewares/validation";
+import { isValidTimezone } from "../../../shared/utils/timezone";
 
 export const itemsRouter = Router();
 applyUuidParamValidation(itemsRouter);
@@ -172,7 +173,18 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
     if (!isValidUUID(id)) {
       return res.status(400).json({ error: "Invalid format for identifier" });
     }
-    const { status, title, itemType, dueDate, metadata, snoozedUntil } = req.body;
+
+    const [existingItem] = await db
+      .select()
+      .from(items)
+      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
+      .limit(1);
+
+    if (!existingItem) {
+      return res.status(404).json({ error: "Item not found or could not be updated" });
+    }
+
+    const { status, title, itemType, dueDate, metadata, snoozedUntil, hasExplicitTime: bodyHasExplicitTime } = req.body;
     
     // Determine if we need to auto-adjust completedAt based on incoming status
     let completedAt: Date | null | undefined = undefined;
@@ -182,43 +194,143 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
       completedAt = null;
     }
 
+    const existingMeta = (existingItem.metadata as any) || {};
+    const baseMetadata = metadata !== undefined ? { ...metadata } : { ...existingMeta };
+
+    // Resolve hasExplicitTime:
+    // If not provided in request body, preserve the existing item's flag (behavior for PATCH dueDate edit with no hasExplicitTime).
+    // If provided in body (at top-level or inside metadata), use the provided boolean.
+    let resolvedHasExplicitTime: boolean;
+    if (bodyHasExplicitTime !== undefined) {
+      resolvedHasExplicitTime = Boolean(bodyHasExplicitTime);
+    } else if (metadata?.hasExplicitTime !== undefined) {
+      resolvedHasExplicitTime = Boolean(metadata.hasExplicitTime);
+    } else {
+      resolvedHasExplicitTime = Boolean(existingMeta.hasExplicitTime);
+    }
+
+    // Determine user's timezone for date/time calculations
+    const [user] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
+    const savedTimezone = (user?.settings as any)?.timezone;
+    let userTimezone = isValidTimezone(savedTimezone) ? savedTimezone : null;
+    if (!userTimezone && req.headers["x-timezone"]) {
+      const headerTz = req.headers["x-timezone"] as string;
+      if (isValidTimezone(headerTz)) {
+        userTimezone = headerTz;
+        const currentSettings = (user?.settings as any) || {};
+        await db.update(users).set({ settings: { ...currentSettings, timezone: userTimezone } }).where(eq(users.id, req.userId!));
+      }
+    }
+    userTimezone = userTimezone || "UTC";
+
+    let resolvedDueDate: Date | null | undefined = undefined;
+    if (dueDate !== undefined) {
+      if (!dueDate) {
+        resolvedDueDate = null;
+      } else if (typeof dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+        const [y, m, d] = dueDate.split("-").map(Number);
+        if (resolvedHasExplicitTime && existingItem.dueDate) {
+          // Keep the item's existing local time of day in the user's timezone, change only the date
+          const existingDate = new Date(existingItem.dueDate);
+          const timeParts = new Intl.DateTimeFormat("en-US", {
+            timeZone: userTimezone,
+            hour: "numeric",
+            minute: "numeric",
+            second: "numeric",
+            hour12: false,
+          }).formatToParts(existingDate);
+
+          let hour = 9, minute = 0, second = 0;
+          for (const p of timeParts) {
+            if (p.type === "hour") hour = parseInt(p.value, 10);
+            if (p.type === "minute") minute = parseInt(p.value, 10);
+            if (p.type === "second") second = parseInt(p.value, 10);
+          }
+          if (hour === 24) hour = 0;
+
+          resolvedDueDate = reminderService.calculateScheduledDate(
+            new Date(Date.UTC(y, m - 1, d)),
+            0,
+            hour,
+            minute,
+            userTimezone
+          );
+        } else {
+          // Date-only items keep 09:00 local in user's timezone
+          resolvedDueDate = reminderService.calculateScheduledDate(
+            new Date(Date.UTC(y, m - 1, d)),
+            0,
+            9,
+            0,
+            userTimezone
+          );
+        }
+      } else {
+        resolvedDueDate = new Date(dueDate);
+      }
+    }
+
     const updatePayload: any = {};
     if (status !== undefined) updatePayload.status = status;
     if (title !== undefined) updatePayload.title = title;
     if (itemType !== undefined) updatePayload.itemType = itemType;
-    if (metadata !== undefined) updatePayload.metadata = metadata;
     if (snoozedUntil !== undefined) {
       updatePayload.snoozedUntil = snoozedUntil ? new Date(snoozedUntil) : null;
     }
     if (dueDate !== undefined) {
-      updatePayload.dueDate = dueDate ? new Date(dueDate) : null;
+      updatePayload.dueDate = resolvedDueDate;
     }
     if (completedAt !== undefined) {
       updatePayload.completedAt = completedAt;
     }
 
-    const [updatedItem] = await db
-      .update(items)
-      .set(updatePayload)
-      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
-      .returning();
-
-    if (!updatedItem) {
-      return res.status(404).json({ error: "Item not found or could not be updated" });
+    // Persist the flag in item metadata on edit
+    if (dueDate !== undefined || bodyHasExplicitTime !== undefined || metadata !== undefined) {
+      updatePayload.metadata = {
+        ...baseMetadata,
+        hasExplicitTime: resolvedHasExplicitTime,
+      };
     }
 
-    // If deadline was provided in payload, automatically reschedule relative reminders
-    if (dueDate !== undefined) {
-      await reminderService.rescheduleForDeadlineChange(id, new Date(dueDate));
-    }
+    const eventsToPublish: Array<{ userId: string; event: any }> = [];
+    const updatedItem = await db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(items)
+        .set(updatePayload)
+        .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
+        .returning();
 
-    // If completed or reopened, adjust reminders
-    if (status === "completed") {
-      await db.update(reminders).set({ status: "dismissed" }).where(eq(reminders.itemId, id));
-    } else if (status === "active") {
-      await db.update(reminders).set({ status: "scheduled" }).where(eq(reminders.itemId, id));
-    }
+      // If deadline was provided in payload, automatically reschedule reminders
+      if (dueDate !== undefined) {
+        await reminderService.syncItemReminderLifecycle(
+          id,
+          req.userId!,
+          "reschedule",
+          {
+            newDueDate: resolvedDueDate,
+            hasExplicitTime: resolvedHasExplicitTime,
+            timezone: userTimezone,
+            itemTitle: updated.title,
+          },
+          tx,
+          eventsToPublish
+        );
+      }
 
+      // If completed or reopened, adjust reminders via lifecycle sync
+      if (status === "completed") {
+        await reminderService.syncItemReminderLifecycle(id, req.userId!, "complete", undefined, tx, eventsToPublish);
+      } else if (status === "active") {
+        await reminderService.syncItemReminderLifecycle(id, req.userId!, "reopen", undefined, tx, eventsToPublish);
+      }
+
+      return updated;
+    });
+
+    // POST-COMMIT: Publish collected events
+    for (const { userId, event } of eventsToPublish) {
+      eventBus.publish(userId, event);
+    }
     eventBus.publish(req.userId!, {
       type: "changed",
       entity: "item",
@@ -307,15 +419,28 @@ itemsRouter.delete("/:id", requireAuth, async (req: AuthenticatedRequest, res, n
       return res.status(400).json({ error: "Invalid format for identifier" });
     }
     
-    // Deleting item cascades to associated reminders
-    const [deletedItem] = await db.delete(items)
-      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
-      .returning();
+    // Wrap lifecycle sync and item delete in one db.transaction
+    const eventsToPublish: Array<{ userId: string; event: any }> = [];
+    const deletedItem = await db.transaction(async (tx) => {
+      // Sync reminder lifecycle before deleting item (cancels pending reminders, leaves sent alone, detaches itemId)
+      await reminderService.syncItemReminderLifecycle(id, req.userId!, "delete", undefined, tx, eventsToPublish);
+
+      const [deleted] = await tx
+        .delete(items)
+        .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
+        .returning();
+
+      return deleted;
+    });
     
     if (!deletedItem) {
       return res.status(404).json({ error: "Item not found" });
     }
 
+    // POST-COMMIT: Publish collected events
+    for (const { userId, event } of eventsToPublish) {
+      eventBus.publish(userId, event);
+    }
     eventBus.publish(req.userId!, {
       type: "changed",
       entity: "item",

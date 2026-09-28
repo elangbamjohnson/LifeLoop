@@ -3,6 +3,7 @@ import { items, captures, users, itemRelations } from "../../db/schema";
 import { eq, and, or } from "drizzle-orm";
 import { reminderService } from "./ReminderService";
 import { GoogleGenAI } from "@google/genai";
+import { isValidTimezone } from "../../shared/utils/timezone";
 
 export interface AIProvider {
   processCapture(captureId: string, userId: string, rawPayload: string, type: string, clientTimezone?: string): Promise<void>;
@@ -11,7 +12,7 @@ export interface AIProvider {
 /**
  * Shared helper to save extracted items and automatically compute relation suggestions and reminders.
  */
-async function saveExtractedItems(
+export async function saveExtractedItems(
   userId: string,
   captureId: string,
   parsedItems: any[],
@@ -89,8 +90,13 @@ async function saveExtractedItems(
       }
     }
 
+    const hasExplicitTime =
+      item.hasExplicitTime === true ||
+      (item.metadata && item.metadata.hasExplicitTime === true);
+
     const metadataToSave = {
       ...(item.metadata || {}),
+      hasExplicitTime,
       ...(suggestedRelationTargetId ? {
         suggestedRelationTargetId,
         suggestedRelationTitle,
@@ -100,8 +106,7 @@ async function saveExtractedItems(
 
     let parsedDueDate: Date | null = null;
     if (item.dueDate) {
-      parsedDueDate = item.dueDate instanceof Date ? item.dueDate : new Date(item.dueDate);
-      if (isNaN(parsedDueDate.getTime())) parsedDueDate = null;
+      parsedDueDate = convertLocalWallClockToUTC(item.dueDate, userTimezone);
     }
 
     const [createdItem] = await db.insert(items).values({
@@ -135,15 +140,14 @@ async function saveExtractedItems(
       }
     }
 
-    // Create relative reminders if autoReminders is enabled and item has a valid dueDate
+    // Create reminders if autoReminders is enabled and item has a valid dueDate
     if (autoRemindersEnabled && isHighConfidence && createdItem.dueDate) {
-      await reminderService.createStandardRelativeReminders(
+      await reminderService.createRemindersForItem(
         createdItem.id,
         userId,
         createdItem.title,
         createdItem.dueDate,
-        [-30, -7, -1, 0],
-        "web",
+        hasExplicitTime,
         userTimezone
       );
     }
@@ -153,6 +157,150 @@ async function saveExtractedItems(
 /**
  * Live Google Gemini AI Provider for real natural language extraction.
  */
+export const GEMINI_MODEL = "gemini-3.5-flash-lite";
+
+export function convertLocalWallClockToUTC(
+  dateInput: string | Date | null | undefined,
+  userTimezone: string = "UTC"
+): Date | null {
+  if (!dateInput) return null;
+  if (dateInput instanceof Date) {
+    if (isNaN(dateInput.getTime())) return null;
+    return dateInput;
+  }
+
+  const str = String(dateInput).trim();
+  if (!str) return null;
+
+  // Match YYYY-MM-DD and optional THH:mm[:ss]
+  // Note: we intentionally disregard any trailing timezone offset or 'Z' returned by the model
+  const match = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!match) {
+    const fallback = new Date(str);
+    return isNaN(fallback.getTime()) ? null : fallback;
+  }
+
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+  const hour = match[4] !== undefined ? parseInt(match[4], 10) : 9;
+  const minute = match[5] !== undefined ? parseInt(match[5], 10) : 0;
+  const second = match[6] !== undefined ? parseInt(match[6], 10) : 0;
+
+  const tz = isValidTimezone(userTimezone) ? userTimezone : "UTC";
+  const wallUtcMs = Date.UTC(year, month - 1, day, hour, minute, second);
+
+  // Helper: compute timezone offset (in ms) at a given UTC instant.
+  // Returns offsetMs such that localMs = utcMs + offsetMs.
+  function getOffsetMs(utcMs: number): number {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "numeric",
+      minute: "numeric",
+      second: "numeric",
+      hour12: false,
+    }).formatToParts(new Date(utcMs));
+
+    let y = year, mo = month, d = day, h = hour, mi = minute, s = second;
+    for (const p of parts) {
+      if (p.type === "year") y = parseInt(p.value, 10);
+      if (p.type === "month") mo = parseInt(p.value, 10);
+      if (p.type === "day") d = parseInt(p.value, 10);
+      if (p.type === "hour") h = parseInt(p.value, 10);
+      if (p.type === "minute") mi = parseInt(p.value, 10);
+      if (p.type === "second") s = parseInt(p.value, 10);
+    }
+    if (h === 24) h = 0;
+    const localMs = Date.UTC(y, mo - 1, d, h, mi, s);
+    return localMs - utcMs;
+  }
+
+  // Pass 1: offset at the wall-clock-treated-as-UTC instant
+  const offset1 = getOffsetMs(wallUtcMs);
+  const utc1 = wallUtcMs - offset1;
+
+  // Pass 2: offset at the first estimate
+  const offset2 = getOffsetMs(utc1);
+
+  if (offset1 === offset2) {
+    // No DST transition — both agree
+    return new Date(utc1);
+  }
+
+  // DST transition detected: prefer the second-pass result if it round-trips
+  const utc2 = wallUtcMs - offset2;
+  const offset3 = getOffsetMs(utc2);
+
+  if (offset3 === offset2) {
+    // utc2 round-trips correctly (e.g. 03:30 EDT post-spring-forward)
+    return new Date(utc2);
+  }
+
+  // utc2 does not round-trip: gap (non-existent local time). Use first-pass result
+  // which maps to the wall clock time in the pre-transition offset (e.g. 02:30 → 07:30Z)
+  return new Date(utc1);
+}
+
+export function buildExtractionPrompt(
+  rawPayload: string,
+  type: string = "text",
+  userTimezone: string = "UTC",
+  now: Date = new Date()
+): string {
+  const currentTimeStr = now.toLocaleString("en-US", { timeZone: userTimezone, timeZoneName: "shortOffset" });
+
+  return `You are LifeLoop, an intelligent personal life assistant.
+Extract all structured actionable items, deadlines, obligations, or entities from this user capture.
+User's Timezone: ${userTimezone}
+Current Date and Time: ${currentTimeStr} (Assume this is "now" when interpreting relative times like "today", "tomorrow", or "at 7pm").
+
+Classification Rules for itemType:
+- "document": Receipts, maintenance records, service invoices, oil changes, tire rotations, warranties, registration papers, identity docs, leases. IMPORTANT: NEVER classify a maintenance receipt, service record, or repair bill as "vehicle" or "home" entity!
+- "vehicle": ONLY the vehicle itself as an asset/entity (e.g. "I bought a Honda Civic", "2024 Honda Civic Sport car info").
+- "home": ONLY the physical property/home itself as an asset/entity (e.g. "Moved to 123 Main St", "Purchased condo").
+- "renewal": Insurance renewals, lease renewals, license renewal deadlines, subscription renewals.
+- "payment": Unpaid bills, credit card statements, due payments.
+- "waiting_for": Pending responses, expecting a callback or package or refund from someone.
+- "appointment": Doctor visits, dentist appointments, service appointments scheduled for a specific time.
+- "task": General to-dos and action items.
+
+Deadline & Time Rules:
+- Return all dates and times as LOCAL wall-clock time in the user's timezone formatted as "YYYY-MM-DDTHH:mm:ss" (without timezone offset or 'Z').
+- Do NOT convert to UTC or append timezone offsets (do NOT return +05:30 or -04:00 or Z). The server converts local wall-clock time to UTC in code using the user's timezone.
+- For date-only deadlines without an explicit clock time (e.g. "on Oct 5", "due next Friday", "due the 18th", "by end of month", "March 2027", "Meeting with Henderson tomorrow"), set the time component to 09:00:00 local time ("YYYY-MM-DDT09:00:00").
+- If a day-of-month is specified without a month (e.g. "due the 18th", "pay on the 5th") and that day has already passed in the current month relative to Current Date and Time, roll to that day in the NEXT month (e.g. if Current Date is September 28, "due the 18th" is October 18).
+- If the user specifies a relative day of the week without an exact date (e.g. "next Friday", "this Tuesday"), calculate the exact local date relative to Current Date and Time.
+- "hasExplicitTime": boolean; true ONLY if the user stated an explicit clock time or relative duration ("at 4:30 pm", "in 2 minutes", "tomorrow 10 am", "Gym at 6"); false for date-only ("on Oct 5", "next Friday", "the 18th", "by end of month", "March 2027", "Meeting with Henderson tomorrow"); false when unsure.
+
+User input (${type}):
+"${rawPayload}"
+
+Return ONLY valid JSON adhering strictly to this schema:
+{
+  "items": [
+    {
+      "title": "Clear, concise title (e.g. Geico Car Insurance Renewal, Downtown Auto Care Oil Change, Mr. Henderson Pipe Repair)",
+      "itemType": "renewal" | "payment" | "waiting_for" | "subscription" | "document" | "appointment" | "vehicle" | "home" | "task",
+      "dueDate": "Local wall-clock ISO string formatted as YYYY-MM-DDTHH:mm:ss (e.g. 2026-10-18T09:00:00 for date-only at 09:00:00 local time, or exact local time like 2026-10-05T16:30:00 when clock time is specified, NO timezone offset or Z) or null if no deadline",
+      "hasExplicitTime": false,
+      "confidenceScore": 0.95,
+      "metadata": {
+        "amount": 185.50 or null,
+        "currency": "USD" or "INR" or null,
+        "vendor": "Downtown Auto Care or null",
+        "service": "Oil change and tire rotation or null",
+        "waitingFor": "person or company name if waiting on someone, else null",
+        "policyNumber": "string or null",
+        "description": "brief context"
+      }
+    }
+  ]
+}`;
+}
+
 export class GeminiAIProvider implements AIProvider {
   private ai: GoogleGenAI;
   private mockFallback: MockAIProvider;
@@ -173,60 +321,16 @@ export class GeminiAIProvider implements AIProvider {
     const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
     const userSettings = (user?.settings as any) || {};
     const autoRemindersEnabled = userSettings.autoReminders === true;
-    const userTimezone = clientTimezone || userSettings.timezone || "UTC";
+    const rawTz = clientTimezone || userSettings.timezone;
+    const userTimezone = isValidTimezone(rawTz) ? rawTz : "UTC";
 
     const now = new Date();
-    const todayStr = new Intl.DateTimeFormat("en-CA", { 
-      timeZone: userTimezone, 
-      year: "numeric", 
-      month: "2-digit", 
-      day: "2-digit" 
-    }).format(now);
-    const currentTimeStr = now.toLocaleString("en-US", { timeZone: userTimezone, timeZoneName: "shortOffset" });
-
-    const prompt = `You are LifeLoop, an intelligent personal life assistant.
-Extract all structured actionable items, deadlines, obligations, or entities from this user capture.
-User's Timezone: ${userTimezone}
-Current Date and Time: ${currentTimeStr} (Assume this is "now" when interpreting relative times like "today", "tomorrow", or "at 7pm").
-
-Classification Rules for itemType:
-- "document": Receipts, maintenance records, service invoices, oil changes, tire rotations, warranties, registration papers, identity docs, leases. IMPORTANT: NEVER classify a maintenance receipt, service record, or repair bill as "vehicle" or "home" entity!
-- "vehicle": ONLY the vehicle itself as an asset/entity (e.g. "I bought a Honda Civic", "2024 Honda Civic Sport car info").
-- "home": ONLY the physical property/home itself as an asset/entity (e.g. "Moved to 123 Main St", "Purchased condo").
-- "renewal": Insurance renewals, lease renewals, license renewal deadlines, subscription renewals.
-- "payment": Unpaid bills, credit card statements, due payments.
-- "waiting_for": Pending responses, expecting a callback or package or refund from someone.
-- "appointment": Doctor visits, dentist appointments, service appointments scheduled for a specific time.
-- "task": General to-dos and action items.
-
-User input (${type}):
-"${rawPayload}"
-
-Return ONLY valid JSON adhering strictly to this schema:
-{
-  "items": [
-    {
-      "title": "Clear, concise title (e.g. Geico Car Insurance Renewal, Downtown Auto Care Oil Change, Mr. Henderson Pipe Repair)",
-      "itemType": "renewal" | "payment" | "waiting_for" | "subscription" | "document" | "appointment" | "vehicle" | "home" | "task",
-      "dueDate": "ISO 8601 string timestamp with correct timezone offset (e.g. 2026-10-15T09:00:00-04:00) or null if no deadline/due date mentioned",
-      "confidenceScore": 0.95,
-      "metadata": {
-        "amount": 185.50 or null,
-        "currency": "USD" or null,
-        "vendor": "Downtown Auto Care or null",
-        "service": "Oil change and tire rotation or null",
-        "waitingFor": "person or company name if waiting on someone, else null",
-        "policyNumber": "string or null",
-        "description": "brief context"
-      }
-    }
-  ]
-}`;
+    const prompt = buildExtractionPrompt(rawPayload, type, userTimezone, now);
 
     let itemsList: any[] = [];
     try {
       const response = await this.ai.models.generateContent({
-        model: "gemini-3.5-flash-lite",
+        model: GEMINI_MODEL,
         contents: prompt,
         config: {
           responseMimeType: "application/json"
@@ -234,6 +338,9 @@ Return ONLY valid JSON adhering strictly to this schema:
       });
 
       const text = response.text;
+      if (process.env.DEBUG_AI) {
+        console.log(`[RAW MODEL RESPONSE for "${rawPayload}"]: ${text}`);
+      }
       if (text) {
         const parsed = JSON.parse(text);
         if (Array.isArray(parsed.items) && parsed.items.length > 0) {
@@ -253,7 +360,7 @@ Return ONLY valid JSON adhering strictly to this schema:
         return;
       }
       console.warn(`[Gemini AI] Live LLM returned no items. Falling back to heuristic mock extraction with explicit warning.`);
-      return this.mockFallback.processCapture(captureId, userId, rawPayload, type);
+      return this.mockFallback.processCapture(captureId, userId, rawPayload, type, userTimezone);
     }
 
     await saveExtractedItems(userId, captureId, itemsList, rawPayload, autoRemindersEnabled, userTimezone);
@@ -278,7 +385,8 @@ export class MockAIProvider implements AIProvider {
     const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
     const userSettings = (user?.settings as any) || {};
     const autoRemindersEnabled = userSettings.autoReminders === true;
-    const userTimezone = userSettings.timezone || "UTC";
+    const rawTz = clientTimezone || userSettings.timezone;
+    const userTimezone = isValidTimezone(rawTz) ? rawTz : "UTC";
 
     // TEST SCENARIOS (Deterministic Invalid States)
     if (rawPayload.includes("TEST_PROVIDER_ERROR")) {
@@ -296,16 +404,65 @@ export class MockAIProvider implements AIProvider {
       return;
     }
 
-    // Helper: try extracting dynamic date if present in string like "October 15, 2026"
-    const parseDynamicDate = (str: string): Date | null => {
-      const monthNames = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
-      const regex = new RegExp(`(${monthNames}\\s+\\d{1,2}(?:st|nd|rd|th)?,?\\s+\\d{4})`, "i");
-      const match = str.match(regex);
-      if (match) {
-        const d = new Date(match[1]);
-        if (!isNaN(d.getTime())) return d;
+    // Helper: try extracting dynamic date and/or time from string
+    const parseDynamicDateTime = (str: string): { dueDate: Date | null; hasExplicitTime: boolean } => {
+      const lowerStr = str.toLowerCase();
+
+      // 1. Relative time like "in 2 minutes", "in 5 mins", "in 1 hour"
+      const relativeMatch = lowerStr.match(/\bin\s+(\d+)\s*(minute|min|hour|hr|second|sec)s?\b/i);
+      if (relativeMatch) {
+        const val = parseInt(relativeMatch[1], 10);
+        const unit = relativeMatch[2].toLowerCase();
+        const multiplier = unit.startsWith("h") ? 3600000 : unit.startsWith("s") ? 1000 : 60000;
+        return {
+          dueDate: new Date(Date.now() + val * multiplier),
+          hasExplicitTime: true,
+        };
       }
-      return null;
+
+      // 2. Explicit clock time like "at 4:30 pm", "at 4:30", "at 16:30", "4:30 pm"
+      const timeMatch = lowerStr.match(/\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i) ||
+                         lowerStr.match(/\bat\s+(\d{1,2}):(\d{2})\b/i);
+
+      // Check if a calendar date is also mentioned (e.g. "Oct 5", "October 15, 2026")
+      const monthNames = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
+      const dateRegex = new RegExp(`(${monthNames}\\s+\\d{1,2}(?:st|nd|rd|th)?,?(?:\\s+\\d{4})?)`, "i");
+      const dateMatch = str.match(dateRegex);
+
+      if (timeMatch) {
+        let hours = parseInt(timeMatch[1], 10);
+        const minutes = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+        const meridian = timeMatch[3]?.toLowerCase();
+
+        if (meridian === "pm" && hours < 12) hours += 12;
+        if (meridian === "am" && hours === 12) hours = 0;
+
+        let targetDate: Date;
+        if (dateMatch) {
+          const year = dateMatch[1].match(/\d{4}/) ? "" : ` ${new Date().getFullYear()}`;
+          targetDate = new Date(`${dateMatch[1]}${year}`);
+        } else {
+          targetDate = new Date();
+        }
+        targetDate.setHours(hours, minutes, 0, 0);
+        return {
+          dueDate: targetDate,
+          hasExplicitTime: true,
+        };
+      }
+
+      if (dateMatch) {
+        const year = dateMatch[1].match(/\d{4}/) ? "" : ` ${new Date().getFullYear()}`;
+        const d = new Date(`${dateMatch[1]}${year}`);
+        if (!isNaN(d.getTime())) {
+          return {
+            dueDate: d,
+            hasExplicitTime: false,
+          };
+        }
+      }
+
+      return { dueDate: null, hasExplicitTime: false };
     };
 
     // 1. Renewal / Insurance (evaluated before generic 'due')
@@ -313,19 +470,22 @@ export class MockAIProvider implements AIProvider {
       const matchAmount = rawPayload.match(/(?:₹|\$|€|£)\s*([0-9,]+(?:\.[0-9]{2})?)/);
       const amount = matchAmount ? parseFloat(matchAmount[1].replace(/,/g, "")) : 185.50;
       const currency = rawPayload.includes("$") ? "USD" : rawPayload.includes("€") ? "EUR" : "INR";
-      const dynamicDate = parseDynamicDate(rawPayload);
+      const dt = parseDynamicDateTime(rawPayload);
+      const dynamicDate = dt.dueDate;
 
       parsedItems.push({
         title: lower.includes("geico") ? "Geico Car Insurance Renewal" : "Car Insurance",
         itemType: "renewal",
         dueDate: dynamicDate || new Date("2026-10-15T09:00:00Z"),
+        hasExplicitTime: dt.hasExplicitTime,
         confidenceScore: 0.95,
         metadata: {
           object: "car insurance",
           amount,
           currency,
           policyNumber: rawPayload.match(/#?([A-Z0-9-]{6,})/)?.[1] || "GK-982341",
-          description: rawPayload
+          description: rawPayload,
+          hasExplicitTime: dt.hasExplicitTime,
         }
       });
     }
@@ -334,18 +494,21 @@ export class MockAIProvider implements AIProvider {
       const matchAmount = rawPayload.match(/(?:₹|\$|€|£)\s*([0-9,]+(?:\.[0-9]{2})?)/);
       const amount = matchAmount ? parseFloat(matchAmount[1].replace(/,/g, "")) : 2840;
       const currency = rawPayload.includes("$") ? "USD" : rawPayload.includes("€") ? "EUR" : "INR";
-      const dynamicDate = parseDynamicDate(rawPayload);
+      const dt = parseDynamicDateTime(rawPayload);
+      const dynamicDate = dt.dueDate;
       
       parsedItems.push({
         title: "Electricity bill",
         itemType: "payment",
         dueDate: dynamicDate || new Date("2026-09-18T09:00:00Z"),
+        hasExplicitTime: dt.hasExplicitTime,
         confidenceScore: 0.95,
         metadata: {
           amount,
           currency,
           dueDate: dynamicDate ? dynamicDate.toISOString().split("T")[0] : "2026-09-18",
           description: "Electricity bill",
+          hasExplicitTime: dt.hasExplicitTime,
         }
       });
     } 
@@ -467,19 +630,36 @@ export class MockAIProvider implements AIProvider {
         }
       });
     }
-    // 9. Reminder
-    else if (lower.includes("remind me")) {
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(9, 0, 0, 0);
+    // 9. Reminder / Explicit Time / Dynamic date-time
+    else if (
+      lower.includes("remind me") ||
+      lower.includes("in 2 minutes") ||
+      lower.includes("at 4:30") ||
+      lower.includes("dentist") ||
+      lower.includes("rent") ||
+      parseDynamicDateTime(rawPayload).dueDate !== null
+    ) {
+      const dt = parseDynamicDateTime(rawPayload);
+      let dueDate = dt.dueDate;
+      let hasExplicitTime = dt.hasExplicitTime;
 
+      if (!dueDate) {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(9, 0, 0, 0);
+        dueDate = tomorrow;
+        hasExplicitTime = false;
+      }
+
+      let title = rawPayload.replace(/^remind me (?:to\s+)?/i, "").trim() || "Reminder";
       parsedItems.push({
-        title: rawPayload.replace(/remind me to/i, "").trim() || "Reminder",
-        itemType: "reminder",
-        dueDate: tomorrow,
-        confidenceScore: 0.90,
+        title: title.length > 50 ? title.substring(0, 50) + "..." : title,
+        itemType: lower.includes("dentist") || lower.includes("doctor") ? "appointment" : lower.includes("rent") ? "payment" : "task",
+        dueDate,
+        hasExplicitTime,
+        confidenceScore: 0.95,
         metadata: {
-          trigger: "tomorrow at 9am",
+          hasExplicitTime,
         }
       });
     }

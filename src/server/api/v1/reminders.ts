@@ -6,6 +6,7 @@ import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
 import { reminderService } from "../../services/ReminderService";
 import { eventBus } from "../../services/EventBus";
 import { validateUuidParams, validateUuidBody, isValidUuid, applyUuidParamValidation } from "../../middlewares/validation";
+import { isValidTimezone } from "../../../shared/utils/timezone";
 
 export const remindersRouter = Router();
 applyUuidParamValidation(remindersRouter);
@@ -292,6 +293,12 @@ remindersRouter.put("/preferences", requireAuth, async (req: AuthenticatedReques
       ...currentSettings,
       ...req.body,
     };
+
+    if (updatedSettings.timezone !== undefined) {
+      updatedSettings.timezone = isValidTimezone(updatedSettings.timezone)
+        ? updatedSettings.timezone
+        : "UTC";
+    }
 
     await db
       .update(users)
