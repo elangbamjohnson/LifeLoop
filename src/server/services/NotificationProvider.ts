@@ -1,7 +1,7 @@
 import { db } from "../../db";
 import { notificationLogs, reminders } from "../../db/schema";
 import { eq } from "drizzle-orm";
-import { getMailSender } from "./MailSender";
+import { getMailSender, getAppUrl } from "./MailSender";
 
 export type NotificationChannel = "web" | "ios" | "android" | "email";
 
@@ -193,7 +193,7 @@ export class EmailNotificationProvider implements ChannelProvider {
     const rawSubject = `[LifeLoop] Reminder: ${payload.title}`.replace(/[\r\n]+/g, " ").trim();
     const subject = rawSubject.length > 120 ? rawSubject.slice(0, 117) + "..." : rawSubject;
 
-    const appUrl = (process.env.APP_URL || "").replace(/\/+$/, "");
+    const appUrl = getAppUrl().replace(/\/+$/, "");
     const itemLink = appUrl ? `${appUrl}` : "";
 
     const text = `${payload.title}\n\nDue: ${formattedDue}\n\n${payload.body}${itemLink ? `\n\nView item: ${itemLink}` : ""}`;

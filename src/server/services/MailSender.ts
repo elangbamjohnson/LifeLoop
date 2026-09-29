@@ -6,11 +6,15 @@ export interface MailArgs {
 }
 
 export type MailResult =
-  | { ok: true; messageId?: string }
-  | { ok: false; error: string };
+  | { ok: true; messageId?: string; error?: undefined }
+  | { ok: false; error: string; messageId?: undefined };
 
 export interface MailSender {
   send(args: MailArgs): Promise<MailResult>;
+}
+
+export function getAppUrl(): string {
+  return process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || "";
 }
 
 export class BrevoMailSender implements MailSender {
@@ -54,7 +58,7 @@ export class BrevoMailSender implements MailSender {
         } catch {
           // ignore non-json or empty response
         }
-        return { ok: true, messageId: data?.messageId };
+        return { ok: true as const, messageId: data?.messageId };
       }
 
       let errBody = "";
@@ -67,7 +71,7 @@ export class BrevoMailSender implements MailSender {
 
       // NEVER log API key or email body
       return {
-        ok: false,
+        ok: false as const,
         error: `Brevo API error (${res.status}): ${errBody}`,
       };
     } catch (err: any) {
@@ -75,7 +79,7 @@ export class BrevoMailSender implements MailSender {
       const isTimeout = err?.name === "TimeoutError" || err?.name === "AbortError";
       const errMsg = isTimeout ? "Request timed out" : (err?.message || "Network error");
       return {
-        ok: false,
+        ok: false as const,
         error: errMsg.slice(0, 200),
       };
     }
@@ -100,7 +104,7 @@ export class MockMailSender implements MailSender {
 
   async send(args: MailArgs): Promise<MailResult> {
     if (this.forceFailure) {
-      return { ok: false, error: this.forceFailure };
+      return { ok: false as const, error: this.forceFailure };
     }
 
     const messageId = `<mock-${Date.now()}-${Math.random().toString(36).slice(2)}@lifeloop.local>`;
@@ -113,7 +117,7 @@ export class MockMailSender implements MailSender {
       messageId,
     });
 
-    return { ok: true, messageId };
+    return { ok: true as const, messageId };
   }
 }
 
@@ -122,17 +126,36 @@ let senderInstance: MailSender | null = null;
 export function getMailSender(): MailSender {
   if (senderInstance) return senderInstance;
 
-  const envProvider = process.env.EMAIL_PROVIDER;
+  const rawProvider = process.env.MAIL_PROVIDER;
   const isTest = process.env.NODE_ENV === "test";
+  const isProd = process.env.NODE_ENV === "production";
 
-  if (isTest || envProvider === "mock" || !envProvider) {
+  let activeType: "mock" | "brevo" = "mock";
+
+  if (isTest) {
+    activeType = "mock";
     senderInstance = new MockMailSender();
-  } else if (envProvider === "brevo") {
+  } else if (!rawProvider || rawProvider === "mock") {
+    activeType = "mock";
+    senderInstance = new MockMailSender();
+  } else if (rawProvider === "brevo") {
+    activeType = "brevo";
     senderInstance = new BrevoMailSender();
   } else {
-    senderInstance = new MockMailSender();
+    if (isProd) {
+      throw new Error(
+        `FATAL: Invalid MAIL_PROVIDER '${rawProvider}'. Valid values are 'mock' or 'brevo'.`
+      );
+    } else {
+      console.warn(
+        `[MailSender] Unknown MAIL_PROVIDER '${rawProvider}', falling back to 'mock'.`
+      );
+      activeType = "mock";
+      senderInstance = new MockMailSender();
+    }
   }
 
+  console.log(`[MailSender] Active mail provider: ${activeType}`);
   return senderInstance;
 }
 

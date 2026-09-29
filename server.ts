@@ -12,6 +12,7 @@ import { users } from "./src/db/schema";
 import { getConnectionString, logDbStartup } from "./src/db/config";
 import { reminderService } from "./src/server/services/ReminderService";
 import { captureRetryService } from "./src/server/services/CaptureRetryService";
+import { getAppUrl } from "./src/server/services/MailSender";
 
 // Log once: env=<NODE_ENV> db=<host>:<port>/<dbname> (no credentials).
 // getConnectionString() has already enforced the dev-DB guard inside src/db/index.ts.
@@ -29,11 +30,11 @@ async function startServer() {
     if (!process.env.GEMINI_API_KEY) {
       throw new Error("FATAL: GEMINI_API_KEY environment variable is missing in production. Fix: Set GEMINI_API_KEY in your production environment variables (e.g. export GEMINI_API_KEY=\"<your_gemini_api_key>\").");
     }
-    if (process.env.EMAIL_PROVIDER === "brevo") {
+    if (process.env.MAIL_PROVIDER === "brevo") {
       const missingBrevoVars: string[] = [];
       if (!process.env.BREVO_API_KEY) missingBrevoVars.push("BREVO_API_KEY");
       if (!process.env.EMAIL_FROM_ADDRESS) missingBrevoVars.push("EMAIL_FROM_ADDRESS");
-      if (!process.env.APP_URL) missingBrevoVars.push("APP_URL");
+      if (!getAppUrl()) missingBrevoVars.push("APP_URL or RENDER_EXTERNAL_URL");
       if (missingBrevoVars.length > 0) {
         throw new Error(
           `FATAL: Missing required Brevo environment variable(s) in production: ${missingBrevoVars.join(", ")}. Fix: Set ${missingBrevoVars.join(", ")} in your production environment variables.`

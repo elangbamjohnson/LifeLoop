@@ -9,6 +9,7 @@ import {
   MockMailSender,
   getMailSender,
   setMailSender,
+  getAppUrl,
 } from "../src/server/services/MailSender";
 import {
   EmailNotificationProvider,
@@ -492,6 +493,121 @@ describe("Brevo Reminder Emails & MailSender Integration", () => {
         );
       expect(emailLogs.length).toBe(1);
       expect(emailLogs[0].status).toBe("delivered");
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // D. MailSender configuration, getAppUrl, and provider selection (Items 1 to 3)
+  // ──────────────────────────────────────────────────────────────────────────
+  describe("MailSender configuration, getAppUrl, and provider selection (Items 1 to 3)", () => {
+    it("getAppUrl returns APP_URL when set, falls back to RENDER_EXTERNAL_URL, or returns empty string", () => {
+      const origApp = process.env.APP_URL;
+      const origRender = process.env.RENDER_EXTERNAL_URL;
+
+      process.env.APP_URL = "https://myapp.com";
+      expect(getAppUrl()).toBe("https://myapp.com");
+
+      delete process.env.APP_URL;
+      process.env.RENDER_EXTERNAL_URL = "https://renderapp.com";
+      expect(getAppUrl()).toBe("https://renderapp.com");
+
+      delete process.env.RENDER_EXTERNAL_URL;
+      expect(getAppUrl()).toBe("");
+
+      process.env.APP_URL = origApp;
+      process.env.RENDER_EXTERNAL_URL = origRender;
+    });
+
+    it("getMailSender initializes MockMailSender when MAIL_PROVIDER=mock or unset, ignoring EMAIL_PROVIDER", () => {
+      const origMail = process.env.MAIL_PROVIDER;
+      const origEmail = process.env.EMAIL_PROVIDER;
+      const origNodeEnv = process.env.NODE_ENV;
+
+      process.env.NODE_ENV = "development";
+      process.env.EMAIL_PROVIDER = "brevo"; // Should be completely ignored by MailSender
+      process.env.MAIL_PROVIDER = "mock";
+      setMailSender(null);
+
+      const sender = getMailSender();
+      expect(sender).toBeInstanceOf(MockMailSender);
+
+      process.env.MAIL_PROVIDER = origMail;
+      process.env.EMAIL_PROVIDER = origEmail;
+      process.env.NODE_ENV = origNodeEnv;
+      setMailSender(mockSender);
+    });
+
+    it("getMailSender initializes BrevoMailSender when MAIL_PROVIDER=brevo", () => {
+      const origMail = process.env.MAIL_PROVIDER;
+      const origNodeEnv = process.env.NODE_ENV;
+
+      process.env.NODE_ENV = "development";
+      process.env.MAIL_PROVIDER = "brevo";
+      setMailSender(null);
+
+      const sender = getMailSender();
+      expect(sender).toBeInstanceOf(BrevoMailSender);
+
+      process.env.MAIL_PROVIDER = origMail;
+      process.env.NODE_ENV = origNodeEnv;
+      setMailSender(mockSender);
+    });
+
+    it("getMailSender throws FATAL error in production when MAIL_PROVIDER is invalid", () => {
+      const origMail = process.env.MAIL_PROVIDER;
+      const origNodeEnv = process.env.NODE_ENV;
+
+      process.env.NODE_ENV = "production";
+      process.env.MAIL_PROVIDER = "invalid_provider";
+      setMailSender(null);
+
+      expect(() => getMailSender()).toThrowError(/FATAL: Invalid MAIL_PROVIDER 'invalid_provider'/);
+
+      process.env.MAIL_PROVIDER = origMail;
+      process.env.NODE_ENV = origNodeEnv;
+      setMailSender(mockSender);
+    });
+
+    it("getMailSender logs a warning and falls back to mock outside production when MAIL_PROVIDER is invalid", () => {
+      const origMail = process.env.MAIL_PROVIDER;
+      const origNodeEnv = process.env.NODE_ENV;
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      process.env.NODE_ENV = "development";
+      process.env.MAIL_PROVIDER = "invalid_provider";
+      setMailSender(null);
+
+      const sender = getMailSender();
+      expect(sender).toBeInstanceOf(MockMailSender);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Unknown MAIL_PROVIDER 'invalid_provider'"));
+
+      warnSpy.mockRestore();
+      process.env.MAIL_PROVIDER = origMail;
+      process.env.NODE_ENV = origNodeEnv;
+      setMailSender(mockSender);
+    });
+
+    it("logs one line at startup with the active provider name, without keys or addresses", () => {
+      const origMail = process.env.MAIL_PROVIDER;
+      const origNodeEnv = process.env.NODE_ENV;
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      process.env.NODE_ENV = "development";
+      process.env.MAIL_PROVIDER = "brevo";
+      process.env.BREVO_API_KEY = "sensitive_key_xyz";
+      process.env.EMAIL_FROM_ADDRESS = "sensitive_addr@test.com";
+      setMailSender(null);
+
+      getMailSender();
+      expect(logSpy).toHaveBeenCalledWith("[MailSender] Active mail provider: brevo");
+      const allLogCalls = logSpy.mock.calls.map((c) => c.join(" ")).join(" ");
+      expect(allLogCalls).not.toContain("sensitive_key_xyz");
+      expect(allLogCalls).not.toContain("sensitive_addr@test.com");
+
+      logSpy.mockRestore();
+      process.env.MAIL_PROVIDER = origMail;
+      process.env.NODE_ENV = origNodeEnv;
+      setMailSender(mockSender);
     });
   });
 });
