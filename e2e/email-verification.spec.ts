@@ -84,7 +84,7 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
     await page.goto('/auth');
     await page.fill('input[type="email"]', testEmail);
     await page.fill('input[type="password"]', testPassword);
-    await page.getByRole('button', { name: 'Sign In' }).click();
+    await page.getByRole('button', { name: 'Sign In', exact: true }).click();
 
     // Verify blocked and transitioned to pending screen with guidance
     await expect(page.getByText('Check your email')).toBeVisible();
@@ -150,7 +150,7 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
     // Then we login to get the pending screen and send a new email.
     await page.fill('input[type="email"]', testEmail);
     await page.fill('input[type="password"]', 'Password123!');
-    await page.getByRole('button', { name: 'Sign In' }).click();
+    await page.getByRole('button', { name: 'Sign In', exact: true }).click();
     
     await expect(page.getByText('Check your email')).toBeVisible();
     await page.getByRole('button', { name: 'Resend verification email' }).click();
@@ -253,7 +253,7 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
     await page.goto('/auth');
     await page.fill('input[type="email"]', testEmail);
     await page.fill('input[type="password"]', 'Password123!');
-    await page.getByRole('button', { name: 'Sign In' }).click();
+    await page.getByRole('button', { name: 'Sign In', exact: true }).click();
     
     await expect(page.getByText('Check your email')).toBeVisible();
 
@@ -302,7 +302,7 @@ test.describe('Phase 7.5A-2 Email Verification', () => {
     await page.goto('/auth');
     await page.fill('input[type="email"]', testEmail);
     await page.fill('input[type="password"]', 'ValidPassword123!');
-    await page.getByRole('button', { name: 'Sign In' }).click();
+    await page.getByRole('button', { name: 'Sign In', exact: true }).click();
     
     await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible();
 

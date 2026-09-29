@@ -1,12 +1,91 @@
 import { db } from "../../db";
-import { items, captures, users, itemRelations } from "../../db/schema";
+import { items, captures, users, itemRelations, reminders } from "../../db/schema";
 import { eq, and, or } from "drizzle-orm";
 import { reminderService } from "./ReminderService";
 import { GoogleGenAI } from "@google/genai";
 import { isValidTimezone } from "../../shared/utils/timezone";
 
+export interface ProcessCaptureResult {
+  fallback: boolean;
+  itemCount: number;
+  error?: string;
+}
+
 export interface AIProvider {
-  processCapture(captureId: string, userId: string, rawPayload: string, type: string, clientTimezone?: string): Promise<void>;
+  processCapture(
+    captureId: string,
+    userId: string,
+    rawPayload: string,
+    type: string,
+    clientTimezone?: string,
+    options?: { isFallback?: boolean }
+  ): Promise<ProcessCaptureResult>;
+
+  enrichCapture?(
+    captureId: string,
+    userId: string,
+    rawPayload: string,
+    type: string,
+    clientTimezone?: string
+  ): Promise<boolean>;
+}
+
+/**
+ * Helper to compute AI relation suggestions (belongs_to, service_record) with existing user entities.
+ */
+function computeRelationSuggestion(rawPayload: string, item: any, userEntities: any[]) {
+  const lower = rawPayload.toLowerCase();
+  let suggestedRelationTargetId: string | null = null;
+  let suggestedRelationTitle: string | null = null;
+
+  for (const entity of userEntities) {
+    if (entity.id === item.id) continue;
+    const entityTitleLower = entity.title.toLowerCase();
+    const meta = (entity.metadata as any) || {};
+    const make = (meta.make || "").toLowerCase();
+    const model = (meta.model || "").toLowerCase();
+    const keywords: string[] = meta.keywords || [];
+
+    // 1. Full title substring
+    let matched = lower.includes(entityTitleLower) || entityTitleLower.includes(lower);
+
+    // 2. Token / word matching
+    if (!matched) {
+      const stopWords = new Set([
+        "the", "a", "an", "for", "in", "on", "my", "of", "and", "vehicle", "information",
+        "record", "details", "info", "entity", "sport", "sedan", "suv", "car", "edition"
+      ]);
+      const tokens = entityTitleLower
+        .split(/[\s,._-]+/)
+        .filter((w: string) => w.length > 2 && !stopWords.has(w));
+      
+      if (tokens.length > 0) {
+        const matchedCount = tokens.filter((t: string) => lower.includes(t)).length;
+        if (tokens.length <= 2 && matchedCount === tokens.length) matched = true;
+        else if (tokens.length > 2 && matchedCount >= 2) matched = true;
+      }
+    }
+
+    // 3. Make and model matching
+    if (!matched && make && lower.includes(make)) {
+      if (!model || lower.includes(model.split(" ")[0])) {
+        matched = true;
+      }
+    }
+
+    // 4. Custom keywords matching
+    if (!matched && keywords.some((k: string) => k.length > 2 && lower.includes(k.toLowerCase()))) {
+      matched = true;
+    }
+
+    if (matched) {
+      suggestedRelationTargetId = entity.id;
+      suggestedRelationTitle = entity.title;
+      break;
+    }
+  }
+
+  return { suggestedRelationTargetId, suggestedRelationTitle };
 }
 
 /**
@@ -18,11 +97,9 @@ export async function saveExtractedItems(
   parsedItems: any[],
   rawPayload: string,
   autoRemindersEnabled: boolean,
-  userTimezone: string
-): Promise<void> {
-  const lower = rawPayload.toLowerCase();
-
-  // Query existing user entities for relation suggestions (Phase 6)
+  userTimezone: string,
+  options?: { isFallback?: boolean }
+): Promise<number> {
   const userEntities = await db.select().from(items).where(
     and(
       eq(items.userId, userId),
@@ -35,60 +112,13 @@ export async function saveExtractedItems(
     )
   ).limit(50);
 
+  let createdCount = 0;
+
   for (const item of parsedItems) {
     const isHighConfidence = (item.confidenceScore ?? 0.7) >= 0.8;
     const status = isHighConfidence ? "active" : "pending_review";
 
-    // AI Relation Suggestion Logic
-    let suggestedRelationTargetId: string | null = null;
-    let suggestedRelationTitle: string | null = null;
-
-    for (const entity of userEntities) {
-      if (entity.id === item.id) continue;
-      const entityTitleLower = entity.title.toLowerCase();
-      const meta = (entity.metadata as any) || {};
-      const make = (meta.make || "").toLowerCase();
-      const model = (meta.model || "").toLowerCase();
-      const keywords: string[] = meta.keywords || [];
-
-      // 1. Full title substring
-      let matched = lower.includes(entityTitleLower) || entityTitleLower.includes(lower);
-
-      // 2. Token / word matching (e.g. "honda civic" in "Honda Civic Sport Vehicle Information")
-      if (!matched) {
-        const stopWords = new Set([
-          "the", "a", "an", "for", "in", "on", "my", "of", "and", "vehicle", "information",
-          "record", "details", "info", "entity", "sport", "sedan", "suv", "car", "edition"
-        ]);
-        const tokens = entityTitleLower
-          .split(/[\s,._-]+/)
-          .filter((w: string) => w.length > 2 && !stopWords.has(w));
-        
-        if (tokens.length > 0) {
-          const matchedCount = tokens.filter((t: string) => lower.includes(t)).length;
-          if (tokens.length <= 2 && matchedCount === tokens.length) matched = true;
-          else if (tokens.length > 2 && matchedCount >= 2) matched = true;
-        }
-      }
-
-      // 3. Make and model matching
-      if (!matched && make && lower.includes(make)) {
-        if (!model || lower.includes(model.split(" ")[0])) {
-          matched = true;
-        }
-      }
-
-      // 4. Custom keywords matching
-      if (!matched && keywords.some((k: string) => k.length > 2 && lower.includes(k.toLowerCase()))) {
-        matched = true;
-      }
-
-      if (matched) {
-        suggestedRelationTargetId = entity.id;
-        suggestedRelationTitle = entity.title;
-        break;
-      }
-    }
+    const { suggestedRelationTargetId, suggestedRelationTitle } = computeRelationSuggestion(rawPayload, item, userEntities);
 
     const hasExplicitTime =
       item.hasExplicitTime === true ||
@@ -97,6 +127,7 @@ export async function saveExtractedItems(
     const metadataToSave = {
       ...(item.metadata || {}),
       hasExplicitTime,
+      ...(options?.isFallback ? { isFallbackItem: true } : {}),
       ...(suggestedRelationTargetId ? {
         suggestedRelationTargetId,
         suggestedRelationTitle,
@@ -119,6 +150,8 @@ export async function saveExtractedItems(
       metadata: metadataToSave,
       status,
     }).returning();
+
+    createdCount++;
 
     // Automatically create relationship in itemRelations if an entity was matched
     if (suggestedRelationTargetId) {
@@ -152,10 +185,168 @@ export async function saveExtractedItems(
       );
     }
   }
+
+  return createdCount;
 }
 
 /**
- * Live Google Gemini AI Provider for real natural language extraction.
+ * Shared helper to enrich unmodified fallback items with richer AI extraction during retry.
+ * Option C: only updates items that the user has not manually modified.
+ */
+async function enrichExistingItems(
+  userId: string,
+  captureId: string,
+  parsedItems: any[],
+  rawPayload: string,
+  autoRemindersEnabled: boolean,
+  userTimezone: string
+): Promise<void> {
+  const existingItems = await db.select().from(items).where(eq(items.captureId, captureId));
+
+  const userEntities = await db.select().from(items).where(
+    and(
+      eq(items.userId, userId),
+      or(
+        eq(items.itemType, "vehicle"),
+        eq(items.itemType, "home"),
+        eq(items.itemType, "person"),
+        eq(items.itemType, "subscription")
+      )
+    )
+  ).limit(50);
+
+  if (existingItems.length === 0) {
+    await saveExtractedItems(userId, captureId, parsedItems, rawPayload, autoRemindersEnabled, userTimezone, { isFallback: false });
+    return;
+  }
+
+  for (let i = 0; i < parsedItems.length; i++) {
+    const aiItem = parsedItems[i];
+    const isHighConfidence = (aiItem.confidenceScore ?? 0.7) >= 0.8;
+    const targetStatus = isHighConfidence ? "active" : "pending_review";
+
+    const { suggestedRelationTargetId, suggestedRelationTitle } = computeRelationSuggestion(rawPayload, aiItem, userEntities);
+
+    const metadataToSave = {
+      ...(aiItem.metadata || {}),
+      enrichedByAI: true,
+      ...(suggestedRelationTargetId ? {
+        suggestedRelationTargetId,
+        suggestedRelationTitle,
+        relationPrompt: `This ${aiItem.itemType} appears to belong to your ${suggestedRelationTitle}.`
+      } : {})
+    };
+
+    let parsedDueDate: Date | null = null;
+    if (aiItem.dueDate) {
+      parsedDueDate = aiItem.dueDate instanceof Date ? aiItem.dueDate : new Date(aiItem.dueDate);
+      if (isNaN(parsedDueDate.getTime())) parsedDueDate = null;
+    }
+
+    if (i < existingItems.length) {
+      const existing = existingItems[i];
+      const existingMeta = (existing.metadata as any) || {};
+
+      // Option C safety: If user edited the item, do not overwrite it!
+      const timeDiff = Math.abs(new Date(existing.updatedAt).getTime() - new Date(existing.createdAt).getTime());
+      const wasEditedByUser = existingMeta.userEdited === true || (!existingMeta.isFallbackItem && timeDiff >= 2000);
+
+      if (wasEditedByUser) {
+        console.log(`[AI Enrichment] Preserving user-modified item ${existing.id}`);
+        continue;
+      }
+
+      await db.update(items).set({
+        title: aiItem.title,
+        itemType: aiItem.itemType || "task",
+        dueDate: parsedDueDate,
+        confidenceScore: typeof aiItem.confidenceScore === "number" ? aiItem.confidenceScore : 0.85,
+        metadata: metadataToSave,
+        status: targetStatus,
+        updatedAt: new Date(),
+      }).where(eq(items.id, existing.id));
+
+      if (suggestedRelationTargetId) {
+        try {
+          const relType = aiItem.itemType === "document" ? "service_record" : "belongs_to";
+          await db.insert(itemRelations).values({
+            userId,
+            sourceItemId: existing.id,
+            targetItemId: suggestedRelationTargetId,
+            relationshipType: relType,
+            status: "active",
+            metadata: {
+              autoDetected: true,
+              targetTitle: suggestedRelationTitle,
+            }
+          }).onConflictDoNothing();
+        } catch (relErr) {
+          console.warn(`[AI Provider] Could not auto-insert relation:`, relErr);
+        }
+      }
+
+      // If due date was enriched and reminders are enabled, refresh reminders
+      if (autoRemindersEnabled && isHighConfidence && parsedDueDate) {
+        await db.delete(reminders).where(eq(reminders.itemId, existing.id));
+        await reminderService.createStandardRelativeReminders(
+          existing.id,
+          userId,
+          aiItem.title,
+          parsedDueDate,
+          [-30, -7, -1, 0],
+          "web",
+          userTimezone
+        );
+      }
+    } else {
+      // AI produced more items than fallback: insert additional items
+      const [createdItem] = await db.insert(items).values({
+        userId,
+        captureId,
+        title: aiItem.title,
+        itemType: aiItem.itemType || "task",
+        dueDate: parsedDueDate,
+        confidenceScore: typeof aiItem.confidenceScore === "number" ? aiItem.confidenceScore : 0.85,
+        metadata: metadataToSave,
+        status: targetStatus,
+      }).returning();
+
+      if (suggestedRelationTargetId) {
+        try {
+          const relType = createdItem.itemType === "document" ? "service_record" : "belongs_to";
+          await db.insert(itemRelations).values({
+            userId,
+            sourceItemId: createdItem.id,
+            targetItemId: suggestedRelationTargetId,
+            relationshipType: relType,
+            status: "active",
+            metadata: {
+              autoDetected: true,
+              targetTitle: suggestedRelationTitle,
+            }
+          }).onConflictDoNothing();
+        } catch (relErr) {
+          console.warn(`[AI Provider] Could not auto-insert relation:`, relErr);
+        }
+      }
+
+      if (autoRemindersEnabled && isHighConfidence && createdItem.dueDate) {
+        await reminderService.createStandardRelativeReminders(
+          createdItem.id,
+          userId,
+          createdItem.title,
+          createdItem.dueDate,
+          [-30, -7, -1, 0],
+          "web",
+          userTimezone
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Live Google Gemini AI Provider for real natural language extraction with heuristic fallback.
  */
 export const GEMINI_MODEL = "gemini-3.5-flash-lite";
 
@@ -310,10 +501,43 @@ export class GeminiAIProvider implements AIProvider {
     this.mockFallback = new MockAIProvider();
   }
 
-  async processCapture(captureId: string, userId: string, rawPayload: string, type: string, clientTimezone?: string): Promise<void> {
+  async extractWithGemini(rawPayload: string, type: string, userTimezone: string): Promise<any[]> {
+    const now = new Date();
+    const prompt = buildExtractionPrompt(rawPayload, type, userTimezone, now);
+
+    const response = await this.ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json"
+      }
+    });
+
+    if (process.env.DEBUG_AI) {
+      console.log(`[RAW MODEL RESPONSE for "${rawPayload}"]: ${response.text}`);
+    }
+
+    const text = response.text;
+    if (text) {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed.items) && parsed.items.length > 0) {
+        return parsed.items;
+      }
+    }
+    return [];
+  }
+
+  async processCapture(
+    captureId: string,
+    userId: string,
+    rawPayload: string,
+    type: string,
+    clientTimezone?: string,
+    options?: { isFallback?: boolean }
+  ): Promise<ProcessCaptureResult> {
     // In automated tests or simulated error tests, use deterministic mock
     if (process.env.NODE_ENV === "test" || rawPayload.includes("TEST_")) {
-      return this.mockFallback.processCapture(captureId, userId, rawPayload, type, clientTimezone);
+      return this.mockFallback.processCapture(captureId, userId, rawPayload, type, clientTimezone, options);
     }
 
     console.log(`[Gemini AI] Processing capture ${captureId} with live LLM...`);
@@ -321,50 +545,64 @@ export class GeminiAIProvider implements AIProvider {
     const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
     const userSettings = (user?.settings as any) || {};
     const autoRemindersEnabled = userSettings.autoReminders === true;
-    const rawTz = clientTimezone || userSettings.timezone;
-    const userTimezone = isValidTimezone(rawTz) ? rawTz : "UTC";
+    const userTimezone = clientTimezone || userSettings.timezone || "UTC";
 
-    const now = new Date();
-    const prompt = buildExtractionPrompt(rawPayload, type, userTimezone, now);
+    let itemsList: any[] = [];
+    let liveError: any = null;
+
+    try {
+      itemsList = await this.extractWithGemini(rawPayload, type, userTimezone);
+    } catch (err: any) {
+      liveError = err;
+      console.warn(`[Gemini AI] Live LLM extraction failed for capture ${captureId}:`, err.message || err);
+    }
+
+    if (itemsList.length > 0) {
+      const createdCount = await saveExtractedItems(userId, captureId, itemsList, rawPayload, autoRemindersEnabled, userTimezone, { isFallback: false });
+      console.log(`[Gemini AI] Successfully processed capture ${captureId} into ${createdCount} items via live LLM.`);
+      return { fallback: false, itemCount: createdCount };
+    }
+
+    console.warn(`[Gemini AI] Live LLM unavailable or returned 0 items for capture ${captureId}. Falling back to heuristic extraction.`);
+    const fallbackResult = await this.mockFallback.processCapture(captureId, userId, rawPayload, type, clientTimezone, { isFallback: true });
+
+    return {
+      fallback: true,
+      itemCount: fallbackResult.itemCount,
+      error: liveError?.message || "Live LLM returned 0 items"
+    };
+  }
+
+  async enrichCapture(
+    captureId: string,
+    userId: string,
+    rawPayload: string,
+    type: string,
+    clientTimezone?: string
+  ): Promise<boolean> {
+    console.log(`[Gemini AI] Attempting background retry/enrichment for capture ${captureId}...`);
+
+    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const userSettings = (user?.settings as any) || {};
+    const autoRemindersEnabled = userSettings.autoReminders === true;
+    const userTimezone = clientTimezone || userSettings.timezone || "UTC";
 
     let itemsList: any[] = [];
     try {
-      const response = await this.ai.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json"
-        }
-      });
-
-      const text = response.text;
-      if (process.env.DEBUG_AI) {
-        console.log(`[RAW MODEL RESPONSE for "${rawPayload}"]: ${text}`);
-      }
-      if (text) {
-        const parsed = JSON.parse(text);
-        if (Array.isArray(parsed.items) && parsed.items.length > 0) {
-          itemsList = parsed.items;
-        }
-      }
+      itemsList = await this.extractWithGemini(rawPayload, type, userTimezone);
     } catch (err: any) {
-      console.error(`[Gemini AI] Live LLM extraction failed:`, err.message || err);
-      if (process.env.NODE_ENV === "production") {
-        throw new Error(`[Gemini AI] Live LLM extraction failed in production: ${err.message || err}`);
-      }
+      console.warn(`[Gemini AI] Retry LLM extraction failed for capture ${captureId}:`, err.message || err);
+      return false;
     }
 
-    if (itemsList.length === 0) {
-      if (process.env.NODE_ENV === "production") {
-        console.warn(`[Gemini AI] No items returned by live LLM for capture ${captureId}.`);
-        return;
-      }
-      console.warn(`[Gemini AI] Live LLM returned no items. Falling back to heuristic mock extraction with explicit warning.`);
-      return this.mockFallback.processCapture(captureId, userId, rawPayload, type, userTimezone);
+    if (!itemsList || itemsList.length === 0) {
+      console.warn(`[Gemini AI] Retry LLM returned 0 items for capture ${captureId}.`);
+      return false;
     }
 
-    await saveExtractedItems(userId, captureId, itemsList, rawPayload, autoRemindersEnabled, userTimezone);
-    console.log(`[Gemini AI] Successfully processed capture ${captureId} into ${itemsList.length} items.`);
+    await enrichExistingItems(userId, captureId, itemsList, rawPayload, autoRemindersEnabled, userTimezone);
+    console.log(`[Gemini AI] Successfully enriched capture ${captureId} with ${itemsList.length} AI items.`);
+    return true;
   }
 }
 
@@ -372,11 +610,20 @@ export class GeminiAIProvider implements AIProvider {
  * Deterministic Mock AI Provider for offline development and automated CI suites.
  */
 export class MockAIProvider implements AIProvider {
-  async processCapture(captureId: string, userId: string, rawPayload: string, type: string, clientTimezone?: string): Promise<void> {
+  async processCapture(
+    captureId: string,
+    userId: string,
+    rawPayload: string,
+    type: string,
+    clientTimezone?: string,
+    options?: { isFallback?: boolean }
+  ): Promise<ProcessCaptureResult> {
     console.log(`[AI MOCK] Processing capture ${captureId}...`);
     
-    // Simulate latency
-    await new Promise(resolve => setTimeout(resolve, 800));
+    // Simulate latency (skip in fallback or test to keep tests fast)
+    if (!options?.isFallback && process.env.NODE_ENV !== "test") {
+      await new Promise(resolve => setTimeout(resolve, 800));
+    }
     
     const lower = rawPayload.toLowerCase();
     const parsedItems: any[] = [];
@@ -401,7 +648,7 @@ export class MockAIProvider implements AIProvider {
     }
     if (rawPayload.includes("TEST_NULL_RESPONSE")) {
       console.log(`[AI MOCK] Empty response for capture ${captureId}`);
-      return;
+      return { fallback: false, itemCount: 0 };
     }
 
     // Helper: try extracting dynamic date and/or time from string
@@ -682,8 +929,48 @@ export class MockAIProvider implements AIProvider {
       });
     }
 
-    await saveExtractedItems(userId, captureId, parsedItems, rawPayload, autoRemindersEnabled, userTimezone);
-    console.log(`[AI MOCK] Finished processing capture ${captureId}`);
+    const createdCount = await saveExtractedItems(userId, captureId, parsedItems, rawPayload, autoRemindersEnabled, userTimezone, options);
+    console.log(`[AI MOCK] Finished processing capture ${captureId} (${createdCount} items)`);
+    return { fallback: options?.isFallback ?? false, itemCount: createdCount };
+  }
+
+  async enrichCapture(
+    captureId: string,
+    userId: string,
+    rawPayload: string,
+    type: string,
+    clientTimezone?: string
+  ): Promise<boolean> {
+    console.log(`[AI MOCK] Enriching capture ${captureId}...`);
+    if (rawPayload.includes("TEST_RETRY_FAIL")) {
+      return false;
+    }
+    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const userSettings = (user?.settings as any) || {};
+    const autoRemindersEnabled = userSettings.autoReminders === true;
+    const userTimezone = clientTimezone || userSettings.timezone || "UTC";
+
+    const lower = rawPayload.toLowerCase();
+    const parsedItems: any[] = [];
+    if (lower.includes("dentist")) {
+      parsedItems.push({
+        title: "Dentist Appointment",
+        itemType: "appointment",
+        dueDate: new Date(Date.now() + 7 * 24 * 3600 * 1000),
+        confidenceScore: 0.95,
+        metadata: { service: "Dentist checkup", enriched: true }
+      });
+    } else {
+      parsedItems.push({
+        title: rawPayload.substring(0, 50),
+        itemType: "task",
+        confidenceScore: 0.9,
+        metadata: { enriched: true }
+      });
+    }
+
+    await enrichExistingItems(userId, captureId, parsedItems, rawPayload, autoRemindersEnabled, userTimezone);
+    return true;
   }
 }
 

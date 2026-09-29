@@ -6,7 +6,8 @@ export interface Capture {
   type: string;
   rawPayload: string;
   originalFilename: string | null;
-  processingStatus: "pending" | "processing" | "completed" | "failed";
+  processingStatus: "pending" | "processing" | "completed" | "failed" | "fallback_pending_retry";
+  metadata?: Record<string, any> | null;
   createdAt: string;
 }
 

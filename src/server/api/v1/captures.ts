@@ -9,6 +9,7 @@ import { storage } from "../../services/StorageProvider";
 import { aiProvider } from "../../services/AIProvider";
 import { eventBus } from "../../services/EventBus";
 import { isValidTimezone } from "../../../shared/utils/timezone";
+import { captureRetryService } from "../../services/CaptureRetryService";
 
 export const capturesRouter = Router();
 applyUuidParamValidation(capturesRouter);
@@ -82,6 +83,16 @@ capturesRouter.post("/", requireAuth, upload.single("file"), async (req: Authent
     const clientTimezone = rawClientTimezone !== undefined
       ? (isValidTimezone(rawClientTimezone) ? rawClientTimezone : "UTC")
       : undefined;
+
+    // Persist clientTimezone in the capture metadata so background retries
+    // use the correct timezone when re-enriching with AI.
+    if (clientTimezone) {
+      await db
+        .update(captures)
+        .set({ metadata: { ...(capture.metadata as any || {}), clientTimezone } })
+        .where(eq(captures.id, capture.id))
+        .catch(e => (req as any).log?.warn(e, `Failed to persist clientTimezone for capture ${capture.id}`));
+    }
     processCaptureAsync(capture.id, req.userId!, capture.rawPayload, capture.type, (req as any).log, clientTimezone).catch(e => {
       (req as any).log?.error(e, `Async processing failed for capture ${capture.id}`);
     });
@@ -95,8 +106,34 @@ capturesRouter.post("/", requireAuth, upload.single("file"), async (req: Authent
 async function processCaptureAsync(captureId: string, userId: string, payload: string, type: string, logger: any, clientTimezone?: string) {
   try {
     await db.update(captures).set({ processingStatus: "processing" }).where(eq(captures.id, captureId));
-    await aiProvider.processCapture(captureId, userId, payload, type, clientTimezone);
-    await db.update(captures).set({ processingStatus: "completed" }).where(eq(captures.id, captureId));
+    const result = await aiProvider.processCapture(captureId, userId, payload, type, clientTimezone);
+
+    if (result?.fallback) {
+      const nextRetryAt = new Date(Date.now() + 30 * 1000);
+      const [curr] = await db.select().from(captures).where(eq(captures.id, captureId)).limit(1);
+      const metadata = {
+        ...((curr?.metadata as any) || {}),
+        fallbackUsed: true,
+        fallbackReason: result.error || "Live AI unavailable",
+      };
+
+      await db
+        .update(captures)
+        .set({
+          processingStatus: "fallback_pending_retry",
+          retryCount: 0,
+          nextRetryAt,
+          metadata,
+        })
+        .where(eq(captures.id, captureId));
+
+      if (logger) {
+        logger.warn(`Capture ${captureId} processed via heuristic fallback; scheduled background retry for ${nextRetryAt.toISOString()}`);
+      }
+    } else {
+      await db.update(captures).set({ processingStatus: "completed" }).where(eq(captures.id, captureId));
+    }
+
     eventBus.publish(userId, {
       type: "changed",
       entity: "capture",
@@ -169,3 +206,56 @@ capturesRouter.delete("/:id", requireAuth, validateUuidParams("id"), async (req:
     next(error);
   }
 });
+
+// Retry AI enrichment for capture
+capturesRouter.post("/:id/retry", requireAuth, validateUuidParams("id"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const [capture] = await db
+      .select()
+      .from(captures)
+      .where(and(eq(captures.id, id), eq(captures.userId, req.userId!)))
+      .limit(1);
+
+    if (!capture) {
+      return res.status(404).json({ error: "Capture not found" });
+    }
+
+    const clientTimezone = (req.headers["x-timezone"] as string | undefined) || (capture.metadata as any)?.clientTimezone;
+
+    const metadata = {
+      ...((capture.metadata as any) || {}),
+      aiEnrichmentFailed: false,
+      lastRetryError: null,
+      clientTimezone: clientTimezone || (capture.metadata as any)?.clientTimezone,
+    };
+
+    await db
+      .update(captures)
+      .set({
+        processingStatus: "fallback_pending_retry",
+        retryCount: 0,
+        nextRetryAt: null,
+        metadata,
+      })
+      .where(eq(captures.id, id));
+
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "capture",
+      id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
+
+    const updatedCapture = { ...capture, metadata, processingStatus: "fallback_pending_retry" as const, retryCount: 0 };
+    captureRetryService.retryCapture(updatedCapture as any).catch(e => {
+      (req as any).log?.error(e, `Manual retry failed for capture ${id}`);
+    });
+
+    res.json({ success: true, message: "AI retry initiated" });
+  } catch (error) {
+    next(error);
+  }
+});
+

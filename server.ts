@@ -11,6 +11,7 @@ import { db } from "./src/db";
 import { users } from "./src/db/schema";
 import { getConnectionString, logDbStartup } from "./src/db/config";
 import { reminderService } from "./src/server/services/ReminderService";
+import { captureRetryService } from "./src/server/services/CaptureRetryService";
 
 // Log once: env=<NODE_ENV> db=<host>:<port>/<dbname> (no credentials).
 // getConnectionString() has already enforced the dev-DB guard inside src/db/index.ts.
@@ -64,10 +65,12 @@ async function startServer() {
     const actualPort = typeof address === "string" ? PORT : address?.port;
     console.log(`Server running on http://${host}:${actualPort}`);
 
-    // Start in-process background reminder scheduler
+    // Start in-process background schedulers
     if (process.env.NODE_ENV !== "test") {
       reminderService.startScheduler(60000);
       console.log("[ReminderScheduler] Background reminder scheduler active (interval: 60s)");
+      captureRetryService.startScheduler(60000);
+      console.log("[CaptureRetryScheduler] Background capture retry scheduler active (interval: 60s)");
     }
   });
 }

@@ -123,7 +123,11 @@ export const ItemCard: React.FC<ItemCardProps> = React.memo(({
 
     let className = "bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 border border-stone-200 dark:border-stone-700/60";
     if (item.badgeVariant === "urgent") {
+      // Genuinely overdue (past due date)
       className = "bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-900";
+    } else if (item.badgeVariant === "review") {
+      // Pending AI confirmation – amber, NOT red
+      className = "bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900";
     } else if (item.badgeVariant === "today") {
       className = "bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900";
     } else if (item.badgeVariant === "upcoming") {
@@ -139,6 +143,7 @@ export const ItemCard: React.FC<ItemCardProps> = React.memo(({
   // Specialized UI for Waiting For items
   if (item.itemType === "waiting_for" && !isPendingReview) {
     const person = item.metadata?.waitingFor || item.metadata?.person || "Someone";
+    // Only "urgent" (past due date) counts as overdue — not "review" (pending confirmation)
     const isOverdue = item.badgeVariant === "urgent";
     
     return (

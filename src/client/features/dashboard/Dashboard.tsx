@@ -66,6 +66,7 @@ export function Dashboard() {
   const [editingItem, setEditingItem] = useState<TimelineItem | null>(null);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const [retryingCaptureId, setRetryingCaptureId] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     title: string;
@@ -253,7 +254,10 @@ export function Dashboard() {
   // Keep hasProcessing in sync with capture statuses after each fetch
   useEffect(() => {
     const next = captures.some(
-      (c) => c.processingStatus === "pending" || c.processingStatus === "processing",
+      (c) =>
+        c.processingStatus === "pending" ||
+        c.processingStatus === "processing" ||
+        c.processingStatus === "fallback_pending_retry",
     );
     setHasProcessing(next);
   }, [captures]);
@@ -431,12 +435,39 @@ export function Dashboard() {
     });
   };
 
-  const getStatusIcon = (status: string) => {
+  const handleRetryCapture = async (captureId: string) => {
+    try {
+      setRetryingCaptureId(captureId);
+      const res = await fetch(`/api/v1/captures/${captureId}/retry`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-timezone": Intl.DateTimeFormat().resolvedOptions().timeZone,
+          "X-Client-Id": tabId,
+        },
+      });
+      if (!res.ok) throw new Error("Retry request failed");
+      showToast("AI enrichment retry initiated");
+      deduplicatedRefetch();
+    } catch (err: any) {
+      console.error("Retry capture error:", err);
+      showToast("Failed to initiate AI retry");
+    } finally {
+      setTimeout(() => setRetryingCaptureId(null), 1000);
+    }
+  };
+
+  const getStatusIcon = (status: string, metadata?: any) => {
+    if (status === "completed" && metadata?.aiEnrichmentFailed) {
+      return <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />;
+    }
     switch (status) {
       case "completed":
         return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />;
       case "processing":
         return <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin" />;
+      case "fallback_pending_retry":
+        return <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-pulse" />;
       case "failed":
         return <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />;
       default:
@@ -1085,8 +1116,15 @@ export function Dashboard() {
 
                   <div className="flex gap-3 overflow-x-auto no-scrollbar py-1">
                     {reminderItems.map((item) => {
-                      const isOverdue = item.badgeVariant === "urgent" || (item.dueDate && new Date(item.dueDate).getTime() <= now.getTime());
-                      const isToday = !isOverdue && item.dueDate && new Date(item.dueDate).toDateString() === now.toDateString();
+                      // KEY FIX: "urgent" (past due date) is overdue.
+                      // "review" (pending_review) is NEVER shown as overdue—
+                      // even if badgeVariant was previously "urgent" for review items.
+                      const isPendingReview = item.status === "pending_review";
+                      const isOverdue = !isPendingReview && (
+                        item.badgeVariant === "urgent" ||
+                        (item.dueDate && new Date(item.dueDate).getTime() <= now.getTime())
+                      );
+                      const isToday = !isOverdue && !isPendingReview && item.dueDate && new Date(item.dueDate).toDateString() === now.toDateString();
                       return (
                         <div
                           key={`carousel-${item.id}`}
@@ -1099,13 +1137,15 @@ export function Dashboard() {
                           <div>
                             <div className="flex items-center justify-between gap-1.5 mb-2">
                               <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide uppercase ${
-                                isOverdue
+                                isPendingReview
+                                  ? "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 dark:border-amber-900/60"
+                                  : isOverdue
                                   ? "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200 dark:border-rose-900/60"
                                   : isToday
                                   ? "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 dark:border-amber-900/60"
                                   : "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border border-blue-200 dark:border-blue-900/60"
                               }`}>
-                                {isOverdue ? "Overdue" : isToday ? "Today" : "Upcoming"}
+                                {isPendingReview ? "Needs Review" : isOverdue ? "Overdue" : isToday ? "Today" : "Upcoming"}
                               </span>
                               {item.dueDate && (
                                 <span className="text-[11px] text-[#A8A29E] flex items-center gap-1">
@@ -1183,18 +1223,18 @@ export function Dashboard() {
                 <div className="flex items-center gap-2 text-rose-700 dark:text-rose-400">
                   <CheckCircle className="w-4 h-4" />
                   <h2 className="text-xs font-semibold uppercase tracking-wider">
-                    Today ({timeline.today.length})
+                    Today ({timeline.today.filter(i => i.status !== "pending_review").length})
                   </h2>
                 </div>
               </div>
 
-              {timeline.today.length === 0 ? (
+              {timeline.today.filter(i => i.status !== "pending_review").length === 0 ? (
                 <div className="py-5 px-4 bg-white/50 dark:bg-[#23201E]/50 rounded-2xl border border-[#E7E5E4] dark:border-[#383330] text-xs text-[#78716C] dark:text-[#A8A29E]">
                   Nothing due today. You are completely on track!
                 </div>
               ) : (
                 <div className="space-y-2.5">
-                  {timeline.today.map((item) => (
+                  {timeline.today.filter(i => i.status !== "pending_review").map((item) => (
                     <ItemCard
                       key={item.id}
                       item={item}
@@ -1202,6 +1242,7 @@ export function Dashboard() {
                       onSnooze={handleSnooze}
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
+                      onConfirmAI={handleConfirmAI}
                     />
                   ))}
                 </div>
@@ -1213,19 +1254,17 @@ export function Dashboard() {
               <div className="flex items-center gap-2 text-blue-700 dark:text-blue-400">
                 <Calendar className="w-4 h-4" />
                 <h2 className="text-xs font-semibold uppercase tracking-wider">
-                  Upcoming ({timeline.tomorrow.length + timeline.thisWeek.length + timeline.upcoming.length})
+                  Upcoming ({[...timeline.tomorrow, ...timeline.thisWeek, ...timeline.upcoming].filter(i => i.status !== "pending_review").length})
                 </h2>
               </div>
 
-              {timeline.tomorrow.length === 0 &&
-              timeline.thisWeek.length === 0 &&
-              timeline.upcoming.length === 0 ? (
+              {[...timeline.tomorrow, ...timeline.thisWeek, ...timeline.upcoming].filter(i => i.status !== "pending_review").length === 0 ? (
                 <div className="py-5 px-4 bg-white/50 dark:bg-[#23201E]/50 rounded-2xl border border-[#E7E5E4] dark:border-[#383330] text-xs text-[#78716C] dark:text-[#A8A29E]">
                   No upcoming deadlines detected yet.
                 </div>
               ) : (
                 <div className="space-y-2.5">
-                  {[...timeline.tomorrow, ...timeline.thisWeek, ...timeline.upcoming].map((item) => (
+                  {[...timeline.tomorrow, ...timeline.thisWeek, ...timeline.upcoming].filter(i => i.status !== "pending_review").map((item) => (
                     <ItemCard
                       key={item.id}
                       item={item}
@@ -1233,6 +1272,7 @@ export function Dashboard() {
                       onSnooze={handleSnooze}
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
+                      onConfirmAI={handleConfirmAI}
                     />
                   ))}
                 </div>
@@ -1258,6 +1298,7 @@ export function Dashboard() {
                       onSnooze={handleSnooze}
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
+                      onConfirmAI={handleConfirmAI}
                     />
                   ))}
                 </div>
@@ -1277,6 +1318,29 @@ export function Dashboard() {
             tabIndex={0}
             className="focus:outline-none space-y-8"
           >
+            {/* OVERDUE / ATTENTION */}
+            {timeline.needsAttention.filter(i => !i.dueDate || new Date(i.dueDate).getTime() <= now.getTime()).length > 0 && (
+              <div className="space-y-3">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-rose-500" />
+                  Overdue / Needs Attention ({timeline.needsAttention.filter(i => !i.dueDate || new Date(i.dueDate).getTime() <= now.getTime()).length})
+                </h2>
+                <div className="space-y-2.5 pl-3 border-l-2 border-rose-200 dark:border-rose-900/60">
+                  {timeline.needsAttention.filter(i => !i.dueDate || new Date(i.dueDate).getTime() <= now.getTime()).map((item) => (
+                    <ItemCard
+                      key={item.id}
+                      item={item}
+                      onToggleComplete={handleToggleComplete}
+                      onSnooze={handleSnooze}
+                      onEdit={setEditingItem}
+                      onDelete={handleDeleteItem}
+                      onConfirmAI={handleConfirmAI}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* TODAY */}
             <div className="space-y-3">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-[#A8A29E] flex items-center gap-1.5">
@@ -1295,6 +1359,7 @@ export function Dashboard() {
                       onSnooze={handleSnooze}
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
+                      onConfirmAI={handleConfirmAI}
                     />
                   ))}
                 </div>
@@ -1319,6 +1384,7 @@ export function Dashboard() {
                       onSnooze={handleSnooze}
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
+                      onConfirmAI={handleConfirmAI}
                     />
                   ))}
                 </div>
@@ -1343,6 +1409,7 @@ export function Dashboard() {
                       onSnooze={handleSnooze}
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
+                      onConfirmAI={handleConfirmAI}
                     />
                   ))}
                 </div>
@@ -1367,6 +1434,7 @@ export function Dashboard() {
                       onSnooze={handleSnooze}
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
+                      onConfirmAI={handleConfirmAI}
                     />
                   ))}
                 </div>
@@ -1389,6 +1457,7 @@ export function Dashboard() {
                       onSnooze={handleSnooze}
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
+                      onConfirmAI={handleConfirmAI}
                     />
                   ))}
                 </div>
@@ -1411,6 +1480,7 @@ export function Dashboard() {
                       onSnooze={handleSnooze}
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
+                      onConfirmAI={handleConfirmAI}
                     />
                   ))}
                 </div>
@@ -1455,9 +1525,13 @@ export function Dashboard() {
                         <span className="text-[10px] font-medium uppercase tracking-wider px-2 py-0.5 rounded-full bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
                           {capture.type}
                         </span>
-                        {getStatusIcon(capture.processingStatus)}
+                        {getStatusIcon(capture.processingStatus, capture.metadata)}
                         <span className="text-[11px] text-[#A8A29E]">
-                          {capture.processingStatus}
+                          {capture.processingStatus === "fallback_pending_retry"
+                            ? "enriching with AI..."
+                            : (capture.metadata as any)?.aiEnrichmentFailed
+                            ? "saved (AI unavailable)"
+                            : capture.processingStatus}
                         </span>
                       </div>
 
@@ -1488,6 +1562,18 @@ export function Dashboard() {
                     </div>
 
                     <div className="flex items-center gap-2 self-end sm:self-center">
+                      {((capture.metadata as any)?.aiEnrichmentFailed || capture.processingStatus === "failed") && (
+                        <button
+                          type="button"
+                          onClick={() => handleRetryCapture(capture.id)}
+                          disabled={retryingCaptureId === capture.id}
+                          className="touch-target-48 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-amber-700 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 dark:border-amber-900/60 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors shadow-xs"
+                          title="Retry AI extraction"
+                        >
+                          <Sparkles className={`w-3.5 h-3.5 ${retryingCaptureId === capture.id ? "animate-spin" : ""}`} />
+                          <span>{retryingCaptureId === capture.id ? "Retrying..." : "Retry AI"}</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => handleDeleteCapture(capture.id)}
