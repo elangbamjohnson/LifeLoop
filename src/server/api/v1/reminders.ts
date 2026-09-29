@@ -270,6 +270,7 @@ remindersRouter.get("/preferences", requireAuth, async (req: AuthenticatedReques
     res.json({
       preferences: {
         autoReminders: settings.autoReminders ?? false,
+        emailReminders: settings.emailReminders ?? false,
         channels: settings.channels || ["web"],
         defaultOffsets: settings.defaultOffsets || [-30, -7, -1, 0],
         timezone: settings.timezone || "UTC",
