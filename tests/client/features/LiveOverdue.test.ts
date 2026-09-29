@@ -290,5 +290,56 @@ describe("Live Overdue Labels & Timeline Grouping (fix/live-overdue-labels)", ()
 
     unmount();
   });
+
+  it("Item with hasExplicitTime: true due in 5 minutes reflects live state and flips to Overdue as it crosses the due instant", () => {
+    // 5 minutes in future (e.g. 12:05:00 UTC)
+    const fiveMinutesFuture = new Date(baseTime.getTime() + 5 * 60 * 1000);
+    const explicitTimeItem: TimelineItem = {
+      id: "item-explicit-time-5min",
+      title: "Team Standup Call",
+      itemType: "appointment",
+      status: "active",
+      dueDate: fiveMinutesFuture.toISOString(),
+      metadata: { hasExplicitTime: true },
+      createdAt: baseTime.toISOString(),
+    };
+
+    // 1. Direct getItemBadge check at baseTime (12:00:00): should be "Due today", variant "today"
+    const initialBadge = getItemBadge(explicitTimeItem, baseTime);
+    expect(initialBadge.text).toBe("Due today");
+    expect(initialBadge.variant).toBe("today");
+
+    // 2. Render Dashboard with useNow hook active
+    currentItems = [explicitTimeItem];
+    const { unmount } = render(React.createElement(Dashboard, null));
+
+    const carouselSection = document.getElementById("section-reminders-carousel");
+    expect(carouselSection).not.toBeNull();
+    expect(within(carouselSection!).getByText("Today")).not.toBeNull();
+    expect(within(carouselSection!).queryByText("Overdue")).toBeNull();
+
+    // 3. Advance time by 4 minutes (still before due time 12:05:00)
+    act(() => {
+      vi.advanceTimersByTime(4 * 60 * 1000);
+    });
+    expect(within(carouselSection!).getByText("Today")).not.toBeNull();
+    expect(within(carouselSection!).queryByText("Overdue")).toBeNull();
+
+    // 4. Advance time by 61 seconds (now at 12:05:01, crossing the exact due instant)
+    act(() => {
+      vi.advanceTimersByTime(61 * 1000);
+    });
+
+    // Badge must live-update to "Overdue" with zero page reload or remount
+    expect(within(carouselSection!).queryByText("Today")).toBeNull();
+    expect(within(carouselSection!).getByText("Overdue")).not.toBeNull();
+
+    // Direct badge check at current time: variant "urgent", text "Overdue"
+    const overdueBadge = getItemBadge(explicitTimeItem, new Date(baseTime.getTime() + 5 * 60 * 1000 + 1000));
+    expect(overdueBadge.text).toBe("Overdue");
+    expect(overdueBadge.variant).toBe("urgent");
+
+    unmount();
+  });
 });
 

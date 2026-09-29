@@ -406,5 +406,86 @@ describe("AI Resilience: Immediate Fallback & Background Retry (Option C)", () =
     expect(fetchedItem3.itemType).toBe("task");
     expect(fetchedItem3.status).toBe("active");
   });
+
+  it("A fallback item enriched into a high-confidence item WITH hasExplicitTime: true creates an exact_time reminder at that due instant, not day-offset ladder", async () => {
+    const [capture] = await db.insert(captures).values({
+      userId: testUserId,
+      source: "web",
+      type: "text",
+      rawPayload: "Team standup at 3:30 pm today",
+      processingStatus: "fallback_pending_retry",
+      retryCount: 0,
+      nextRetryAt: new Date(Date.now() - 1000),
+    }).returning();
+
+    // 1. Initial fallback extraction: item created in pending_review with isFallback: true
+    await aiProvider.processCapture(
+      capture.id,
+      testUserId,
+      capture.rawPayload,
+      capture.type,
+      "America/New_York",
+      { isFallback: true }
+    );
+
+    const [fallbackItem] = await db.select().from(items).where(eq(items.captureId, capture.id)).limit(1);
+    expect(fallbackItem.status).toBe("pending_review");
+    expect((fallbackItem.metadata as any)?.isFallbackItem).toBe(true);
+
+    // Initial check: zero reminders exist for fallback item
+    const remindersInitial = await db.select().from(reminders).where(eq(reminders.itemId, fallbackItem.id));
+    expect(remindersInitial.length).toBe(0);
+
+    // 2. High-confidence AI result WITH hasExplicitTime: true and exact clock time
+    const exactLocalWallClock = "2026-10-15T15:30:00";
+    const enrichedAIItems = [
+      {
+        title: "Team standup meeting",
+        itemType: "appointment",
+        confidenceScore: 0.95,
+        dueDate: exactLocalWallClock,
+        hasExplicitTime: true,
+        metadata: {
+          hasExplicitTime: true,
+          meeting: true,
+        },
+      },
+    ];
+
+    // Enable auto-reminders for user
+    const [user] = await db.select().from(users).where(eq(users.id, testUserId)).limit(1);
+    await db.update(users).set({
+      settings: {
+        ...((user.settings as any) || {}),
+        autoReminders: true,
+        timezone: "America/New_York",
+      }
+    }).where(eq(users.id, testUserId));
+
+    // Enrich existing fallback item
+    await enrichExistingItems(
+      testUserId,
+      capture.id,
+      enrichedAIItems,
+      capture.rawPayload,
+      true,
+      "America/New_York"
+    );
+
+    // 3. Verify item updated
+    const [enrichedItem] = await db.select().from(items).where(eq(items.id, fallbackItem.id)).limit(1);
+    expect(enrichedItem.status).toBe("active");
+    expect((enrichedItem.metadata as any)?.hasExplicitTime).toBe(true);
+    expect(enrichedItem.dueDate).not.toBeNull();
+
+    // 4. Verify reminder: MUST be a single exact_time reminder scheduled at the exact due instant!
+    // NOT the old 4-item day-offset ladder [-30, -7, -1, 0] at 9am.
+    const createdReminders = await db.select().from(reminders).where(eq(reminders.itemId, fallbackItem.id));
+    expect(createdReminders.length).toBe(1);
+    expect(createdReminders[0].triggerType).toBe("exact_time");
+    expect(createdReminders[0].relativeOffsetDays).toBe(0);
+    // Scheduled at exact dueDate instant
+    expect(new Date(createdReminders[0].scheduledAt).getTime()).toBe(new Date(enrichedItem.dueDate!).getTime());
+  });
 });
 

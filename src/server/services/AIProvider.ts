@@ -283,10 +283,15 @@ export async function enrichExistingItems(
     const isHighConfidence = (aiItem.confidenceScore ?? 0.7) >= 0.8;
     const targetStatus = isHighConfidence ? "active" : "pending_review";
 
+    const hasExplicitTime =
+      aiItem.hasExplicitTime === true ||
+      (aiItem.metadata && aiItem.metadata.hasExplicitTime === true);
+
     const { suggestedRelationTargetId, suggestedRelationTitle } = computeRelationSuggestion(rawPayload, aiItem, userEntities);
 
     const metadataToSave = {
       ...(aiItem.metadata || {}),
+      hasExplicitTime,
       enrichedByAI: true,
       ...(suggestedRelationTargetId ? {
         suggestedRelationTargetId,
@@ -297,8 +302,7 @@ export async function enrichExistingItems(
 
     let parsedDueDate: Date | null = null;
     if (aiItem.dueDate) {
-      parsedDueDate = aiItem.dueDate instanceof Date ? aiItem.dueDate : new Date(aiItem.dueDate);
-      if (isNaN(parsedDueDate.getTime())) parsedDueDate = null;
+      parsedDueDate = convertLocalWallClockToUTC(aiItem.dueDate, userTimezone);
     }
 
     if (existingItem) {
@@ -345,13 +349,12 @@ export async function enrichExistingItems(
       // If due date was enriched and reminders are enabled, refresh reminders
       if (autoRemindersEnabled && isHighConfidence && parsedDueDate) {
         await db.delete(reminders).where(eq(reminders.itemId, existingItem.id));
-        await reminderService.createStandardRelativeReminders(
+        await reminderService.createRemindersForItem(
           existingItem.id,
           userId,
           aiItem.title,
           parsedDueDate,
-          [-30, -7, -1, 0],
-          "web",
+          hasExplicitTime,
           userTimezone
         );
       } else if (!parsedDueDate || !isHighConfidence) {
@@ -391,13 +394,12 @@ export async function enrichExistingItems(
       }
 
       if (autoRemindersEnabled && isHighConfidence && createdItem.dueDate) {
-        await reminderService.createStandardRelativeReminders(
+        await reminderService.createRemindersForItem(
           createdItem.id,
           userId,
           createdItem.title,
           createdItem.dueDate,
-          [-30, -7, -1, 0],
-          "web",
+          hasExplicitTime,
           userTimezone
         );
       }
