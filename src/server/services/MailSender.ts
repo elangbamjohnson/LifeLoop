@@ -123,24 +123,16 @@ export class MockMailSender implements MailSender {
 
 let senderInstance: MailSender | null = null;
 
-export function getMailSender(): MailSender {
-  if (senderInstance) return senderInstance;
-
+export function validateMailConfig(): { activeType: "mock" | "brevo" } {
   const rawProvider = process.env.MAIL_PROVIDER;
-  const isTest = process.env.NODE_ENV === "test";
   const isProd = process.env.NODE_ENV === "production";
 
   let activeType: "mock" | "brevo" = "mock";
 
-  if (isTest) {
+  if (!rawProvider || rawProvider === "mock") {
     activeType = "mock";
-    senderInstance = new MockMailSender();
-  } else if (!rawProvider || rawProvider === "mock") {
-    activeType = "mock";
-    senderInstance = new MockMailSender();
   } else if (rawProvider === "brevo") {
     activeType = "brevo";
-    senderInstance = new BrevoMailSender();
   } else {
     if (isProd) {
       throw new Error(
@@ -151,11 +143,35 @@ export function getMailSender(): MailSender {
         `[MailSender] Unknown MAIL_PROVIDER '${rawProvider}', falling back to 'mock'.`
       );
       activeType = "mock";
-      senderInstance = new MockMailSender();
     }
   }
 
+  if (isProd && activeType === "mock") {
+    console.warn(
+      "[MailSender] Warning: Email reminders are disabled because MAIL_PROVIDER is not brevo."
+    );
+  }
+
   console.log(`[MailSender] Active mail provider: ${activeType}`);
+  return { activeType };
+}
+
+export function getMailSender(): MailSender {
+  if (senderInstance) return senderInstance;
+
+  const isTest = process.env.NODE_ENV === "test";
+  if (isTest) {
+    senderInstance = new MockMailSender();
+    return senderInstance;
+  }
+
+  const { activeType } = validateMailConfig();
+  if (activeType === "brevo") {
+    senderInstance = new BrevoMailSender();
+  } else {
+    senderInstance = new MockMailSender();
+  }
+
   return senderInstance;
 }
 

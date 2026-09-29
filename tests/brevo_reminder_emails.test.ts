@@ -10,6 +10,7 @@ import {
   getMailSender,
   setMailSender,
   getAppUrl,
+  validateMailConfig,
 } from "../src/server/services/MailSender";
 import {
   EmailNotificationProvider,
@@ -609,5 +610,86 @@ describe("Brevo Reminder Emails & MailSender Integration", () => {
       process.env.NODE_ENV = origNodeEnv;
       setMailSender(mockSender);
     });
+
+    it("validateMailConfig throws in production for 'Brevo' and 'smtp' without calling send()", () => {
+      const origMail = process.env.MAIL_PROVIDER;
+      const origNodeEnv = process.env.NODE_ENV;
+      const sendSpy = vi.spyOn(MockMailSender.prototype, "send");
+
+      process.env.NODE_ENV = "production";
+
+      process.env.MAIL_PROVIDER = "Brevo";
+      expect(() => validateMailConfig()).toThrowError(/FATAL: Invalid MAIL_PROVIDER 'Brevo'/);
+
+      process.env.MAIL_PROVIDER = "smtp";
+      expect(() => validateMailConfig()).toThrowError(/FATAL: Invalid MAIL_PROVIDER 'smtp'/);
+
+      expect(sendSpy).not.toHaveBeenCalled();
+
+      sendSpy.mockRestore();
+      process.env.MAIL_PROVIDER = origMail;
+      process.env.NODE_ENV = origNodeEnv;
+    });
+
+    it("EmailNotificationProvider.send does not throw when getMailSender throws: reminder remains pending and deliveryAttempts increments", async () => {
+      const user = await createTestUser({
+        emailVerified: true,
+        emailReminders: true,
+      });
+
+      const now = new Date("2026-10-15T10:00:00Z");
+      const [reminder] = await db
+        .insert(reminders)
+        .values({
+          userId: user.id,
+          title: "Crash MailSender Reminder",
+          scheduledAt: new Date("2026-10-15T09:30:00Z"),
+          status: "scheduled",
+          channel: "email",
+        })
+        .returning();
+
+      const mailSenderModule = await import("../src/server/services/MailSender");
+      const getMailSenderSpy = vi.spyOn(mailSenderModule, "getMailSender").mockImplementation(() => {
+        throw new Error("Crash during getMailSender initialization");
+      });
+
+      const results = await reminderService.dispatchDueReminders(now);
+      expect(results.some((r) => r.status === "failed")).toBe(true);
+
+      const [afterAttempt] = await db.select().from(reminders).where(eq(reminders.id, reminder.id));
+      expect(afterAttempt.status).toBe("scheduled"); // NOT marked sent
+      expect((afterAttempt.metadata as any)?.deliveryAttempts).toBe(1);
+
+      getMailSenderSpy.mockRestore();
+    });
+
+    it("returns status 'failed' with error 'mail provider not configured' in production when active provider is mock", async () => {
+      const origNodeEnv = process.env.NODE_ENV;
+      const origMail = process.env.MAIL_PROVIDER;
+
+      process.env.NODE_ENV = "production";
+      process.env.MAIL_PROVIDER = "mock";
+      setMailSender(mockSender);
+
+      const provider = new EmailNotificationProvider();
+      const result = await provider.send(
+        {
+          title: "Production Mock Test",
+          body: "Should fail in production with mock",
+          scheduledAt: new Date(),
+          metadata: { userEmail: "user@example.com" },
+        },
+        "idemp-prod-mock-1"
+      );
+
+      expect(result.status).toBe("failed");
+      expect(result.error).toBe("mail provider not configured");
+      expect(result.success).toBe(false);
+
+      process.env.NODE_ENV = origNodeEnv;
+      process.env.MAIL_PROVIDER = origMail;
+    });
   });
 });
+

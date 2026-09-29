@@ -1,7 +1,7 @@
 import { db } from "../../db";
 import { notificationLogs, reminders } from "../../db/schema";
 import { eq } from "drizzle-orm";
-import { getMailSender, getAppUrl } from "./MailSender";
+import { getMailSender, getAppUrl, MockMailSender } from "./MailSender";
 
 export type NotificationChannel = "web" | "ios" | "android" | "email";
 
@@ -157,83 +157,108 @@ export class EmailNotificationProvider implements ChannelProvider {
       };
     }
 
-    const tz = payload.metadata?.timezone || "UTC";
-    let formattedDue = "";
     try {
-      formattedDue = new Intl.DateTimeFormat("en-US", {
-        timeZone: tz,
-        dateStyle: "full",
-        timeStyle: "short",
-      }).format(new Date(payload.scheduledAt));
-    } catch {
+      const isProd = process.env.NODE_ENV === "production";
+      const isTest = process.env.NODE_ENV === "test";
+
+      const sender = getMailSender();
+
+      // In production (not test), if active provider is mock, return failed rather than fake delivery
+      if (isProd && !isTest && (sender instanceof MockMailSender || process.env.MAIL_PROVIDER !== "brevo")) {
+        return {
+          success: false,
+          channel: this.channel,
+          status: "failed",
+          idempotencyKey,
+          error: "mail provider not configured",
+        };
+      }
+
+      const tz = payload.metadata?.timezone || "UTC";
+      let formattedDue = "";
       try {
         formattedDue = new Intl.DateTimeFormat("en-US", {
-          timeZone: "UTC",
+          timeZone: tz,
           dateStyle: "full",
           timeStyle: "short",
         }).format(new Date(payload.scheduledAt));
       } catch {
-        formattedDue = new Date(payload.scheduledAt).toUTCString();
+        try {
+          formattedDue = new Intl.DateTimeFormat("en-US", {
+            timeZone: "UTC",
+            dateStyle: "full",
+            timeStyle: "short",
+          }).format(new Date(payload.scheduledAt));
+        } catch {
+          formattedDue = new Date(payload.scheduledAt).toUTCString();
+        }
       }
-    }
 
-    const escapeHtml = (str: string) =>
-      str
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
+      const escapeHtml = (str: string) =>
+        str
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
 
-    const safeTitle = escapeHtml(payload.title || "");
-    const safeBody = escapeHtml(payload.body || "");
-    const safeDue = escapeHtml(formattedDue);
+      const safeTitle = escapeHtml(payload.title || "");
+      const safeBody = escapeHtml(payload.body || "");
+      const safeDue = escapeHtml(formattedDue);
 
-    // Keep subject to one line (strip newlines, cap ~120 chars)
-    const rawSubject = `[LifeLoop] Reminder: ${payload.title}`.replace(/[\r\n]+/g, " ").trim();
-    const subject = rawSubject.length > 120 ? rawSubject.slice(0, 117) + "..." : rawSubject;
+      // Keep subject to one line (strip newlines, cap ~120 chars)
+      const rawSubject = `[LifeLoop] Reminder: ${payload.title}`.replace(/[\r\n]+/g, " ").trim();
+      const subject = rawSubject.length > 120 ? rawSubject.slice(0, 117) + "..." : rawSubject;
 
-    const appUrl = getAppUrl().replace(/\/+$/, "");
-    const itemLink = appUrl ? `${appUrl}` : "";
+      const appUrl = getAppUrl().replace(/\/+$/, "");
+      const itemLink = appUrl ? `${appUrl}` : "";
 
-    const text = `${payload.title}\n\nDue: ${formattedDue}\n\n${payload.body}${itemLink ? `\n\nView item: ${itemLink}` : ""}`;
-    const html = `
-      <div style="font-family: sans-serif; padding: 20px; color: #1c1917;">
-        <h2 style="margin: 0 0 10px 0;">${safeTitle}</h2>
-        <p style="color: #78716c; font-size: 14px; margin: 0 0 10px 0;"><strong>Due:</strong> ${safeDue}</p>
-        <p style="color: #57534e; font-size: 16px;">${safeBody}</p>
-        ${itemLink ? `<a href="${itemLink}" style="display: inline-block; background: #1c1917; color: #fff; padding: 10px 18px; border-radius: 8px; text-decoration: none; margin-top: 15px;">Open LifeLoop</a>` : ""}
-      </div>
-    `.trim();
+      const text = `${payload.title}\n\nDue: ${formattedDue}\n\n${payload.body}${itemLink ? `\n\nView item: ${itemLink}` : ""}`;
+      const html = `
+        <div style="font-family: sans-serif; padding: 20px; color: #1c1917;">
+          <h2 style="margin: 0 0 10px 0;">${safeTitle}</h2>
+          <p style="color: #78716c; font-size: 14px; margin: 0 0 10px 0;"><strong>Due:</strong> ${safeDue}</p>
+          <p style="color: #57534e; font-size: 16px;">${safeBody}</p>
+          ${itemLink ? `<a href="${itemLink}" style="display: inline-block; background: #1c1917; color: #fff; padding: 10px 18px; border-radius: 8px; text-decoration: none; margin-top: 15px;">Open LifeLoop</a>` : ""}
+        </div>
+      `.trim();
 
-    const sender = getMailSender();
-    const sendResult = await sender.send({
-      to: recipient,
-      subject,
-      text,
-      html,
-    });
+      const sendResult = await sender.send({
+        to: recipient,
+        subject,
+        text,
+        html,
+      });
 
-    if (sendResult.ok) {
-      return {
-        success: true,
-        channel: this.channel,
-        status: "delivered",
-        idempotencyKey,
-        deliveredAt: new Date(),
-        payload: {
-          to: recipient,
-          subject,
-          messageId: sendResult.messageId,
-        },
-      };
-    } else {
+      if (sendResult.ok) {
+        return {
+          success: true,
+          channel: this.channel,
+          status: "delivered",
+          idempotencyKey,
+          deliveredAt: new Date(),
+          payload: {
+            to: recipient,
+            subject,
+            messageId: sendResult.messageId,
+          },
+        };
+      } else {
+        return {
+          success: false,
+          channel: this.channel,
+          status: "failed",
+          idempotencyKey,
+          error: (sendResult.error || "Send failed").slice(0, 200),
+        };
+      }
+    } catch (err: any) {
       return {
         success: false,
         channel: this.channel,
         status: "failed",
         idempotencyKey,
-        error: sendResult.error,
+        error: (err?.message || "Mail sender failure").slice(0, 200),
       };
     }
   }

@@ -12,13 +12,16 @@ import { users } from "./src/db/schema";
 import { getConnectionString, logDbStartup } from "./src/db/config";
 import { reminderService } from "./src/server/services/ReminderService";
 import { captureRetryService } from "./src/server/services/CaptureRetryService";
-import { getAppUrl } from "./src/server/services/MailSender";
+import { getAppUrl, validateMailConfig } from "./src/server/services/MailSender";
 
 // Log once: env=<NODE_ENV> db=<host>:<port>/<dbname> (no credentials).
 // getConnectionString() has already enforced the dev-DB guard inside src/db/index.ts.
 logDbStartup(getConnectionString());
 
 async function startServer() {
+  // Validate mail provider configuration at boot
+  validateMailConfig();
+
   // Strict production safety guards at boot
   if (process.env.NODE_ENV === "production") {
     if (process.env.AI_PROVIDER === "mock") {
