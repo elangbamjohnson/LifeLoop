@@ -46,7 +46,9 @@ export const captures = pgTable("captures", {
   rawPayload: text("raw_payload").notNull(), // text content or URL to asset
   originalFilename: text("original_filename"),
   mimeType: varchar("mime_type", { length: 100 }),
-  processingStatus: varchar("processing_status", { length: 50 }).default("pending").notNull(), // pending, processing, completed, failed
+  processingStatus: varchar("processing_status", { length: 50 }).default("pending").notNull(), // pending, processing, completed, failed, fallback_pending_retry
+  retryCount: integer("retry_count").default(0).notNull(),
+  nextRetryAt: timestamp("next_retry_at", { withTimezone: true }),
   metadata: jsonb("metadata").default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),

@@ -21,7 +21,7 @@ if (!CONN) {
 // Maps tableName -> Set<columnName>
 const EXPECTED: Record<string, string[]> = {
   users: ["id", "email", "password_hash", "google_id", "auth_provider", "is_admin", "settings", "created_at", "updated_at"],
-  captures: ["id", "user_id", "source", "type", "raw_payload", "original_filename", "mime_type", "processing_status", "metadata", "created_at", "updated_at"],
+  captures: ["id", "user_id", "source", "type", "raw_payload", "original_filename", "mime_type", "processing_status", "retry_count", "next_retry_at", "metadata", "created_at", "updated_at"],
   items: ["id", "user_id", "capture_id", "title", "item_type", "status", "confidence_score", "due_date", "snoozed_until", "completed_at", "metadata", "created_at", "updated_at"],
   reminders: ["id", "user_id", "item_id", "title", "trigger_type", "relative_offset_days", "scheduled_at", "recurrence", "channel", "status", "sent_at", "snoozed_until", "metadata", "created_at", "updated_at"],
   item_relations: ["id", "user_id", "source_item_id", "target_item_id", "relationship_type", "status", "metadata", "created_at", "updated_at"],

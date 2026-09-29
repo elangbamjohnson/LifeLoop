@@ -3,7 +3,7 @@ import React from "react";
 import { render, screen, act, cleanup, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Dashboard } from "../../../src/client/features/dashboard/Dashboard";
-import { TimelineItem } from "../../../src/shared/utils/timeline";
+import { TimelineItem, groupItemsIntoTimeline, getItemBadge } from "../../../src/shared/utils/timeline";
 
 // Mock auth hook
 const mockUser = { id: "user-1", email: "user@example.com", isAdmin: true };
@@ -244,4 +244,102 @@ describe("Live Overdue Labels & Timeline Grouping (fix/live-overdue-labels)", ()
 
     unmount();
   });
+
+  it("An unreviewed item due tomorrow gets variant 'review', label 'Tomorrow', and is NOT 'Overdue'", () => {
+    const tomorrowDate = new Date(baseTime.getTime() + 24 * 60 * 60 * 1000);
+    const pendingItem: TimelineItem = {
+      id: "item-pending-tomorrow",
+      title: "Confirm dentist for tomorrow",
+      itemType: "appointment",
+      status: "pending_review",
+      dueDate: tomorrowDate.toISOString(),
+      createdAt: baseTime.toISOString(),
+    };
+
+    // 1. Check getItemBadge directly
+    const badge = getItemBadge(pendingItem, baseTime);
+    expect(badge.variant).toBe("review");
+    expect(badge.text).toBe("Tomorrow");
+
+    // 2. Check groupItemsIntoTimeline: item appears in both needsAttention (for Priority) and tomorrow (for Timeline)
+    const grouping = groupItemsIntoTimeline([pendingItem], baseTime);
+    expect(grouping.needsAttention.map((i) => i.id)).toContain("item-pending-tomorrow");
+    expect(grouping.tomorrow.map((i) => i.id)).toContain("item-pending-tomorrow");
+
+    // 3. Render Dashboard: in Carousel, it says 'Needs Review', NEVER 'Overdue'
+    currentItems = [pendingItem];
+    const { unmount } = render(React.createElement(Dashboard, null));
+
+    const carouselSection = document.getElementById("section-reminders-carousel");
+    expect(carouselSection).not.toBeNull();
+
+    // Must have "Needs Review"
+    expect(within(carouselSection!).queryByText("Needs Review")).not.toBeNull();
+    // Must NOT have "Overdue"
+    expect(within(carouselSection!).queryByText("Overdue")).toBeNull();
+
+    // 4. Switch to Timeline tab
+    const timelineTabBtn = screen.getByRole("tab", { name: /Timeline/i });
+    fireEvent.click(timelineTabBtn);
+
+    // Item must appear in the Timeline view
+    expect(screen.getAllByText("Confirm dentist for tomorrow").length).toBeGreaterThan(0);
+
+    // The Confirm button must be present so user can confirm it
+    expect(screen.getAllByRole("button", { name: /Confirm/i }).length).toBeGreaterThan(0);
+
+    unmount();
+  });
+
+  it("Item with hasExplicitTime: true due in 5 minutes reflects live state and flips to Overdue as it crosses the due instant", () => {
+    // 5 minutes in future (e.g. 12:05:00 UTC)
+    const fiveMinutesFuture = new Date(baseTime.getTime() + 5 * 60 * 1000);
+    const explicitTimeItem: TimelineItem = {
+      id: "item-explicit-time-5min",
+      title: "Team Standup Call",
+      itemType: "appointment",
+      status: "active",
+      dueDate: fiveMinutesFuture.toISOString(),
+      metadata: { hasExplicitTime: true },
+      createdAt: baseTime.toISOString(),
+    };
+
+    // 1. Direct getItemBadge check at baseTime (12:00:00): should be "Due today", variant "today"
+    const initialBadge = getItemBadge(explicitTimeItem, baseTime);
+    expect(initialBadge.text).toBe("Due today");
+    expect(initialBadge.variant).toBe("today");
+
+    // 2. Render Dashboard with useNow hook active
+    currentItems = [explicitTimeItem];
+    const { unmount } = render(React.createElement(Dashboard, null));
+
+    const carouselSection = document.getElementById("section-reminders-carousel");
+    expect(carouselSection).not.toBeNull();
+    expect(within(carouselSection!).getByText("Today")).not.toBeNull();
+    expect(within(carouselSection!).queryByText("Overdue")).toBeNull();
+
+    // 3. Advance time by 4 minutes (still before due time 12:05:00)
+    act(() => {
+      vi.advanceTimersByTime(4 * 60 * 1000);
+    });
+    expect(within(carouselSection!).getByText("Today")).not.toBeNull();
+    expect(within(carouselSection!).queryByText("Overdue")).toBeNull();
+
+    // 4. Advance time by 61 seconds (now at 12:05:01, crossing the exact due instant)
+    act(() => {
+      vi.advanceTimersByTime(61 * 1000);
+    });
+
+    // Badge must live-update to "Overdue" with zero page reload or remount
+    expect(within(carouselSection!).queryByText("Today")).toBeNull();
+    expect(within(carouselSection!).getByText("Overdue")).not.toBeNull();
+
+    // Direct badge check at current time: variant "urgent", text "Overdue"
+    const overdueBadge = getItemBadge(explicitTimeItem, new Date(baseTime.getTime() + 5 * 60 * 1000 + 1000));
+    expect(overdueBadge.text).toBe("Overdue");
+    expect(overdueBadge.variant).toBe("urgent");
+
+    unmount();
+  });
 });
+

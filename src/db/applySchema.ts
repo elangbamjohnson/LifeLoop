@@ -67,10 +67,15 @@ export async function applySchema(sql: postgres.Sql, targetSchema: string): Prom
       original_filename TEXT,
       mime_type VARCHAR(100),
       processing_status VARCHAR(50) NOT NULL DEFAULT 'pending',
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      next_retry_at TIMESTAMP WITH TIME ZONE,
       metadata JSONB DEFAULT '{}'::jsonb,
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE ${targetSchema}.captures ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE ${targetSchema}.captures ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP WITH TIME ZONE;
+    CREATE INDEX IF NOT EXISTS captures_status_retry_idx ON ${targetSchema}.captures(processing_status, next_retry_at);
 
     CREATE TABLE IF NOT EXISTS ${targetSchema}.items (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
