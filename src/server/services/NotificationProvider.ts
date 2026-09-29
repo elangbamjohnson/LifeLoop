@@ -174,25 +174,63 @@ export class EmailNotificationProvider implements ChannelProvider {
         };
       }
 
-      const tz = payload.metadata?.timezone || "UTC";
+      let userTz = "UTC";
+      if (payload.metadata?.timezone) {
+        try {
+          Intl.DateTimeFormat(undefined, { timeZone: payload.metadata.timezone });
+          userTz = payload.metadata.timezone;
+        } catch {
+          userTz = "UTC";
+        }
+      }
+
       let formattedDue = "";
       try {
         formattedDue = new Intl.DateTimeFormat("en-US", {
-          timeZone: tz,
+          timeZone: userTz,
           dateStyle: "full",
           timeStyle: "short",
         }).format(new Date(payload.scheduledAt));
       } catch {
-        try {
-          formattedDue = new Intl.DateTimeFormat("en-US", {
-            timeZone: "UTC",
-            dateStyle: "full",
-            timeStyle: "short",
-          }).format(new Date(payload.scheduledAt));
-        } catch {
-          formattedDue = new Date(payload.scheduledAt).toUTCString();
-        }
+        formattedDue = new Date(payload.scheduledAt).toUTCString();
       }
+
+      const scheduledDate = new Date(payload.scheduledAt);
+      const now = new Date();
+      let isTodayInTz = false;
+      try {
+        const dayFmt = new Intl.DateTimeFormat("en-US", {
+          timeZone: userTz,
+          year: "numeric",
+          month: "numeric",
+          day: "numeric",
+        });
+        isTodayInTz = dayFmt.format(now) === dayFmt.format(scheduledDate);
+      } catch {
+        isTodayInTz = false;
+      }
+
+      let shortDueTime = "";
+      try {
+        if (isTodayInTz) {
+          shortDueTime = new Intl.DateTimeFormat("en-US", {
+            timeZone: userTz,
+            hour: "numeric",
+            minute: "2-digit",
+          }).format(scheduledDate);
+        } else {
+          shortDueTime = new Intl.DateTimeFormat("en-US", {
+            timeZone: userTz,
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          }).format(scheduledDate);
+        }
+      } catch {
+        shortDueTime = scheduledDate.toUTCString();
+      }
+      shortDueTime = shortDueTime.replace(/[\u202F\u00A0]/g, " ").trim();
 
       const escapeHtml = (str: string) =>
         str
@@ -207,19 +245,35 @@ export class EmailNotificationProvider implements ChannelProvider {
       const safeDue = escapeHtml(formattedDue);
 
       // Keep subject to one line (strip newlines, cap ~120 chars)
-      const rawSubject = `[LifeLoop] Reminder: ${payload.title}`.replace(/[\r\n]+/g, " ").trim();
+      const cleanTitle = (payload.title || "").replace(/[\r\n]+/g, " ").trim();
+      let rawSubject: string;
+      if (!cleanTitle) {
+        rawSubject = "Your LifeLoop reminder";
+      } else {
+        rawSubject = `${cleanTitle} at ${shortDueTime}`;
+      }
+      rawSubject = rawSubject.replace(/[\r\n]+/g, " ").trim();
       const subject = rawSubject.length > 120 ? rawSubject.slice(0, 117) + "..." : rawSubject;
 
       const appUrl = getAppUrl().replace(/\/+$/, "");
       const itemLink = appUrl ? `${appUrl}` : "";
 
-      const text = `${payload.title}\n\nDue: ${formattedDue}\n\n${payload.body}${itemLink ? `\n\nView item: ${itemLink}` : ""}`;
+      const footerNotice = "You're getting this because you turned on email reminders in LifeLoop. To stop, turn off \"Email me reminders\" in Preferences.";
+      const textFooter = appUrl
+        ? `${footerNotice}\n${appUrl}`
+        : footerNotice;
+      const htmlFooter = appUrl
+        ? `<p style="color: #78716c; font-size: 12px; margin-top: 24px; line-height: 1.4;">${footerNotice}<br/><a href="${appUrl}" style="color: #78716c;">${appUrl}</a></p>`
+        : `<p style="color: #78716c; font-size: 12px; margin-top: 24px; line-height: 1.4;">${footerNotice}</p>`;
+
+      const text = `${payload.title}\n\nDue: ${formattedDue}\n\n${payload.body}${itemLink ? `\n\nView item: ${itemLink}` : ""}\n\n${textFooter}`;
       const html = `
         <div style="font-family: sans-serif; padding: 20px; color: #1c1917;">
           <h2 style="margin: 0 0 10px 0;">${safeTitle}</h2>
           <p style="color: #78716c; font-size: 14px; margin: 0 0 10px 0;"><strong>Due:</strong> ${safeDue}</p>
           <p style="color: #57534e; font-size: 16px;">${safeBody}</p>
           ${itemLink ? `<a href="${itemLink}" style="display: inline-block; background: #1c1917; color: #fff; padding: 10px 18px; border-radius: 8px; text-decoration: none; margin-top: 15px;">Open LifeLoop</a>` : ""}
+          ${htmlFooter}
         </div>
       `.trim();
 

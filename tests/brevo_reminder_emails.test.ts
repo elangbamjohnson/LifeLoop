@@ -259,6 +259,212 @@ describe("Brevo Reminder Emails & MailSender Integration", () => {
       expect(result.error).toBe("no recipient");
       expect(mockSender.emails.length).toBe(0); // Nothing sent
     });
+
+    it("formats subject for a today reminder with time only (<title> at <short due time>)", async () => {
+      const provider = new EmailNotificationProvider();
+      const now = new Date();
+      // Set to 4:00 PM (16:00:00) UTC today
+      const todayScheduled = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 16, 0, 0));
+      const payload = {
+        reminderId: uuidv4(),
+        userId: uuidv4(),
+        title: "Dentist",
+        body: "Checkup and cleaning",
+        channel: "email" as const,
+        scheduledAt: todayScheduled,
+        metadata: {
+          userEmail: "dentist@example.com",
+          timezone: "UTC",
+        },
+      };
+
+      const result = await provider.send(payload, "key_today");
+      expect(result.status).toBe("delivered");
+      expect(mockSender.emails.length).toBe(1);
+      const sent = mockSender.emails[0];
+      expect(sent.subject).toBe("Dentist at 4:00 PM");
+      expect(sent.subject).not.toContain("[LifeLoop]");
+      expect(sent.subject).not.toContain("Reminder:");
+    });
+
+    it("formats subject for a future-date reminder with short date and time (<title> at <month day, time>)", async () => {
+      const provider = new EmailNotificationProvider();
+      const futureScheduled = new Date("2026-10-03T16:00:00Z");
+      const payload = {
+        reminderId: uuidv4(),
+        userId: uuidv4(),
+        title: "Dentist",
+        body: "Annual exam",
+        channel: "email" as const,
+        scheduledAt: futureScheduled,
+        metadata: {
+          userEmail: "dentist_future@example.com",
+          timezone: "UTC",
+        },
+      };
+
+      const result = await provider.send(payload, "key_future");
+      expect(result.status).toBe("delivered");
+      expect(mockSender.emails.length).toBe(1);
+      const sent = mockSender.emails[0];
+      expect(sent.subject).toBe("Dentist at Oct 3, 4:00 PM");
+      expect(sent.subject).not.toContain("[LifeLoop]");
+      expect(sent.subject).not.toContain("Reminder:");
+    });
+
+    it("uses fallback 'Your LifeLoop reminder' when title is empty or whitespace only", async () => {
+      const provider = new EmailNotificationProvider();
+      const payload1 = {
+        reminderId: uuidv4(),
+        userId: uuidv4(),
+        title: "",
+        body: "A reminder without a title",
+        channel: "email" as const,
+        scheduledAt: new Date("2026-10-03T16:00:00Z"),
+        metadata: {
+          userEmail: "empty_title@example.com",
+          timezone: "UTC",
+        },
+      };
+
+      const result1 = await provider.send(payload1, "key_empty_title_1");
+      expect(result1.status).toBe("delivered");
+      expect(mockSender.emails[0].subject).toBe("Your LifeLoop reminder");
+      expect(mockSender.emails[0].subject).not.toContain("[LifeLoop]");
+      expect(mockSender.emails[0].subject).not.toContain("Reminder:");
+
+      mockSender.emails = [];
+
+      const payload2 = {
+        reminderId: uuidv4(),
+        userId: uuidv4(),
+        title: "   \n\t  ",
+        body: "A reminder with whitespace title",
+        channel: "email" as const,
+        scheduledAt: new Date("2026-10-03T16:00:00Z"),
+        metadata: {
+          userEmail: "empty_title2@example.com",
+          timezone: "UTC",
+        },
+      };
+
+      const result2 = await provider.send(payload2, "key_empty_title_2");
+      expect(result2.status).toBe("delivered");
+      expect(mockSender.emails[0].subject).toBe("Your LifeLoop reminder");
+    });
+
+    it("sanitizes a title with a newline and with <script>: subject stays one line and HTML is escaped", async () => {
+      const provider = new EmailNotificationProvider();
+      const futureDate = new Date("2026-10-03T16:00:00Z");
+      const payload = {
+        reminderId: uuidv4(),
+        userId: uuidv4(),
+        title: "Doctor\nAppointment <script>alert('xss')</script>",
+        body: "Bring insurance card <script>bad()</script>",
+        channel: "email" as const,
+        scheduledAt: futureDate,
+        metadata: {
+          userEmail: "xss_newline@example.com",
+          timezone: "UTC",
+        },
+      };
+
+      const result = await provider.send(payload, "key_xss_newline");
+      expect(result.status).toBe("delivered");
+      expect(mockSender.emails.length).toBe(1);
+      const sent = mockSender.emails[0];
+
+      // Subject stays one line (no newlines) and contains clean title + time
+      expect(sent.subject).not.toContain("\n");
+      expect(sent.subject).not.toContain("\r");
+      expect(sent.subject).toBe("Doctor Appointment <script>alert('xss')</script> at Oct 3, 4:00 PM");
+      expect(sent.subject.length).toBeLessThanOrEqual(120);
+
+      // HTML body escapes the <script> tags
+      expect(sent.html).not.toContain("<script>alert('xss')</script>");
+      expect(sent.html).toContain("&lt;script&gt;alert(&#039;xss&#039;)&lt;/script&gt;");
+      expect(sent.html).toContain("&lt;script&gt;bad()&lt;/script&gt;");
+    });
+
+    it("includes opt-out footer in both text and html versions with app link when APP_URL is set", async () => {
+      const originalAppUrl = process.env.APP_URL;
+      try {
+        process.env.APP_URL = "https://app.lifeloop.com";
+        const provider = new EmailNotificationProvider();
+        const payload = {
+          reminderId: uuidv4(),
+          userId: uuidv4(),
+          title: "Car Service",
+          body: "Oil change and tire rotation",
+          channel: "email" as const,
+          scheduledAt: new Date("2026-10-03T16:00:00Z"),
+          metadata: {
+            userEmail: "footer_test@example.com",
+            timezone: "UTC",
+          },
+        };
+
+        const result = await provider.send(payload, "key_footer_appurl");
+        expect(result.status).toBe("delivered");
+        expect(mockSender.emails.length).toBe(1);
+        const sent = mockSender.emails[0];
+
+        const expectedNotice = "You're getting this because you turned on email reminders in LifeLoop. To stop, turn off \"Email me reminders\" in Preferences.";
+
+        // Text version check
+        expect(sent.text).toContain(expectedNotice);
+        expect(sent.text).toContain("https://app.lifeloop.com");
+
+        // HTML version check (small grey text)
+        expect(sent.html).toContain(expectedNotice);
+        expect(sent.html).toContain("https://app.lifeloop.com");
+        expect(sent.html).toContain("color: #78716c; font-size: 12px;");
+      } finally {
+        if (originalAppUrl !== undefined) {
+          process.env.APP_URL = originalAppUrl;
+        } else {
+          delete process.env.APP_URL;
+        }
+      }
+    });
+
+    it("includes opt-out footer in both text and html without app link when APP_URL and RENDER_EXTERNAL_URL are unset", async () => {
+      const originalAppUrl = process.env.APP_URL;
+      const originalRenderUrl = process.env.RENDER_EXTERNAL_URL;
+      try {
+        delete process.env.APP_URL;
+        delete process.env.RENDER_EXTERNAL_URL;
+        const provider = new EmailNotificationProvider();
+        const payload = {
+          reminderId: uuidv4(),
+          userId: uuidv4(),
+          title: "Car Service",
+          body: "Oil change and tire rotation",
+          channel: "email" as const,
+          scheduledAt: new Date("2026-10-03T16:00:00Z"),
+          metadata: {
+            userEmail: "footer_no_url@example.com",
+            timezone: "UTC",
+          },
+        };
+
+        const result = await provider.send(payload, "key_footer_no_url");
+        expect(result.status).toBe("delivered");
+        expect(mockSender.emails.length).toBe(1);
+        const sent = mockSender.emails[0];
+
+        const expectedNotice = "You're getting this because you turned on email reminders in LifeLoop. To stop, turn off \"Email me reminders\" in Preferences.";
+
+        expect(sent.text).toContain(expectedNotice);
+        expect(sent.html).toContain(expectedNotice);
+        expect(sent.html).toContain("color: #78716c; font-size: 12px;");
+        expect(sent.html).not.toContain("<a href=");
+        expect(sent.text).not.toContain("View item:");
+      } finally {
+        if (originalAppUrl !== undefined) process.env.APP_URL = originalAppUrl;
+        if (originalRenderUrl !== undefined) process.env.RENDER_EXTERNAL_URL = originalRenderUrl;
+      }
+    });
   });
 
   // ──────────────────────────────────────────────────────────────────────────
