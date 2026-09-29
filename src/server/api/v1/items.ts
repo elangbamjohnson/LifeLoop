@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "../../../db";
 import { items, reminders, sharedItems, familyMembers, users } from "../../../db/schema";
-import { eq, desc, and, inArray } from "drizzle-orm";
+import { eq, desc, and, inArray, sql } from "drizzle-orm";
 import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
 import { reminderService } from "../../services/ReminderService";
 import { eventBus } from "../../services/EventBus";
@@ -284,13 +284,16 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
       updatePayload.completedAt = completedAt;
     }
 
-    // Persist the flag in item metadata on edit
-    if (dueDate !== undefined || bodyHasExplicitTime !== undefined || metadata !== undefined) {
-      updatePayload.metadata = {
-        ...baseMetadata,
-        hasExplicitTime: resolvedHasExplicitTime,
-      };
-    }
+    // Explicitly set userEdited flag in metadata whenever an item is updated via PATCH,
+    // and persist hasExplicitTime flag
+    const incomingMeta = (metadata as Record<string, any>) || {};
+    updatePayload.metadata = {
+      ...existingMeta,
+      ...incomingMeta,
+      hasExplicitTime: resolvedHasExplicitTime,
+      userEdited: true,
+    };
+    updatePayload.updatedAt = sql`now()`;
 
     const eventsToPublish: Array<{ userId: string; event: any }> = [];
     const updatedItem = await db.transaction(async (tx) => {

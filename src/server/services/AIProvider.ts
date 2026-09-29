@@ -1,6 +1,6 @@
 import { db } from "../../db";
 import { items, captures, users, itemRelations, reminders } from "../../db/schema";
-import { eq, and, or } from "drizzle-orm";
+import { eq, and, or, asc } from "drizzle-orm";
 import { reminderService } from "./ReminderService";
 import { GoogleGenAI } from "@google/genai";
 import { isValidTimezone } from "../../shared/utils/timezone";
@@ -115,7 +115,7 @@ export async function saveExtractedItems(
   let createdCount = 0;
 
   for (const item of parsedItems) {
-    const isHighConfidence = (item.confidenceScore ?? 0.7) >= 0.8;
+    const isHighConfidence = !options?.isFallback && (item.confidenceScore ?? 0.7) >= 0.8;
     const status = isHighConfidence ? "active" : "pending_review";
 
     const { suggestedRelationTargetId, suggestedRelationTitle } = computeRelationSuggestion(rawPayload, item, userEntities);
@@ -193,7 +193,7 @@ export async function saveExtractedItems(
  * Shared helper to enrich unmodified fallback items with richer AI extraction during retry.
  * Option C: only updates items that the user has not manually modified.
  */
-async function enrichExistingItems(
+export async function enrichExistingItems(
   userId: string,
   captureId: string,
   parsedItems: any[],
@@ -201,7 +201,11 @@ async function enrichExistingItems(
   autoRemindersEnabled: boolean,
   userTimezone: string
 ): Promise<void> {
-  const existingItems = await db.select().from(items).where(eq(items.captureId, captureId));
+  const existingItems = await db
+    .select()
+    .from(items)
+    .where(eq(items.captureId, captureId))
+    .orderBy(asc(items.createdAt), asc(items.id));
 
   const userEntities = await db.select().from(items).where(
     and(
@@ -220,8 +224,62 @@ async function enrichExistingItems(
     return;
   }
 
-  for (let i = 0; i < parsedItems.length; i++) {
-    const aiItem = parsedItems[i];
+  // Stable pairing: Pair each AI item with the best-matching existing fallback item.
+  // Match on title similarity / token overlap first so that reordered results pair correctly.
+  const usedExistingIndices = new Set<number>();
+  const pairedItems: Array<{ aiItem: any; existingItem?: (typeof existingItems)[0] }> = [];
+
+  for (const aiItem of parsedItems) {
+    const aiTitle = (aiItem.title || "").toLowerCase();
+    const aiWords = new Set(aiTitle.split(/[\s,._-]+/).filter((w: string) => w.length > 2));
+
+    let bestIdx = -1;
+    let bestScore = -1;
+
+    for (let j = 0; j < existingItems.length; j++) {
+      if (usedExistingIndices.has(j)) continue;
+      const exTitle = (existingItems[j].title || "").toLowerCase();
+      const exWords = exTitle.split(/[\s,._-]+/).filter((w: string) => w.length > 2);
+
+      let score = 0;
+      if (aiTitle.includes(exTitle) || exTitle.includes(aiTitle)) {
+        score += 10;
+      }
+      for (const w of exWords) {
+        if (aiWords.has(w)) score += 2;
+      }
+      if (aiItem.itemType === existingItems[j].itemType) {
+        score += 1;
+      }
+
+      if (score > bestScore && score > 0) {
+        bestScore = score;
+        bestIdx = j;
+      }
+    }
+
+    if (bestIdx !== -1) {
+      usedExistingIndices.add(bestIdx);
+      pairedItems.push({ aiItem, existingItem: existingItems[bestIdx] });
+    } else {
+      // Find the first unassigned existing item by stable order (createdAt, id)
+      let fallbackIdx = -1;
+      for (let j = 0; j < existingItems.length; j++) {
+        if (!usedExistingIndices.has(j)) {
+          fallbackIdx = j;
+          break;
+        }
+      }
+      if (fallbackIdx !== -1) {
+        usedExistingIndices.add(fallbackIdx);
+        pairedItems.push({ aiItem, existingItem: existingItems[fallbackIdx] });
+      } else {
+        pairedItems.push({ aiItem });
+      }
+    }
+  }
+
+  for (const { aiItem, existingItem } of pairedItems) {
     const isHighConfidence = (aiItem.confidenceScore ?? 0.7) >= 0.8;
     const targetStatus = isHighConfidence ? "active" : "pending_review";
 
@@ -243,16 +301,15 @@ async function enrichExistingItems(
       if (isNaN(parsedDueDate.getTime())) parsedDueDate = null;
     }
 
-    if (i < existingItems.length) {
-      const existing = existingItems[i];
-      const existingMeta = (existing.metadata as any) || {};
+    if (existingItem) {
+      const existingMeta = (existingItem.metadata as any) || {};
 
-      // Option C safety: If user edited the item, do not overwrite it!
-      const timeDiff = Math.abs(new Date(existing.updatedAt).getTime() - new Date(existing.createdAt).getTime());
-      const wasEditedByUser = existingMeta.userEdited === true || (!existingMeta.isFallbackItem && timeDiff >= 2000);
+      // Option C safety: Explicit flag set only by the item PATCH/edit endpoint.
+      // Replaces any timing heuristic completely.
+      const wasEditedByUser = existingMeta.userEdited === true;
 
       if (wasEditedByUser) {
-        console.log(`[AI Enrichment] Preserving user-modified item ${existing.id}`);
+        console.log(`[AI Enrichment] Preserving user-modified item ${existingItem.id}`);
         continue;
       }
 
@@ -264,14 +321,14 @@ async function enrichExistingItems(
         metadata: metadataToSave,
         status: targetStatus,
         updatedAt: new Date(),
-      }).where(eq(items.id, existing.id));
+      }).where(eq(items.id, existingItem.id));
 
       if (suggestedRelationTargetId) {
         try {
           const relType = aiItem.itemType === "document" ? "service_record" : "belongs_to";
           await db.insert(itemRelations).values({
             userId,
-            sourceItemId: existing.id,
+            sourceItemId: existingItem.id,
             targetItemId: suggestedRelationTargetId,
             relationshipType: relType,
             status: "active",
@@ -287,9 +344,9 @@ async function enrichExistingItems(
 
       // If due date was enriched and reminders are enabled, refresh reminders
       if (autoRemindersEnabled && isHighConfidence && parsedDueDate) {
-        await db.delete(reminders).where(eq(reminders.itemId, existing.id));
+        await db.delete(reminders).where(eq(reminders.itemId, existingItem.id));
         await reminderService.createStandardRelativeReminders(
-          existing.id,
+          existingItem.id,
           userId,
           aiItem.title,
           parsedDueDate,
@@ -297,6 +354,9 @@ async function enrichExistingItems(
           "web",
           userTimezone
         );
+      } else if (!parsedDueDate || !isHighConfidence) {
+        // If due date was removed or item is no longer high confidence, cancel existing reminders
+        await db.delete(reminders).where(eq(reminders.itemId, existingItem.id));
       }
     } else {
       // AI produced more items than fallback: insert additional items

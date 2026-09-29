@@ -1,10 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import request from "supertest";
+import jwt from "jsonwebtoken";
 import { db } from "../src/db";
-import { users, captures, items } from "../src/db/schema";
+import { users, captures, items, reminders } from "../src/db/schema";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
-import { aiProvider } from "../src/server/services/AIProvider";
+import { aiProvider, enrichExistingItems } from "../src/server/services/AIProvider";
 import { captureRetryService } from "../src/server/services/CaptureRetryService";
+import { itemsRouter } from "../src/server/api/v1/items";
+import { createTestApp } from "./setup";
+
+const app = createTestApp("/api/v1/items", itemsRouter);
+const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_development_only";
 
 describe("AI Resilience: Immediate Fallback & Background Retry (Option C)", () => {
   const testUserId = uuidv4();
@@ -23,6 +30,7 @@ describe("AI Resilience: Immediate Fallback & Background Retry (Option C)", () =
   });
 
   afterAll(async () => {
+    await db.delete(reminders).where(eq(reminders.userId, testUserId));
     const userCaptures = await db.select().from(captures).where(eq(captures.userId, testUserId));
     for (const c of userCaptures) {
       await db.delete(items).where(eq(items.captureId, c.id));
@@ -222,6 +230,181 @@ describe("AI Resilience: Immediate Fallback & Background Retry (Option C)", () =
     expect(finalCapture.processingStatus).toBe("completed");
     expect((finalCapture.metadata as any)?.aiEnriched).toBe(true);
     expect((finalCapture.metadata as any)?.aiEnrichmentFailed).toBe(false);
+  });
+
+  it("should NOT create auto-reminders for fallback items in pending_review, but creates/reschedules on enrichment", async () => {
+    const [capture] = await db.insert(captures).values({
+      userId: testUserId,
+      source: "web",
+      type: "text",
+      rawPayload: "Dentist Oct 15 at 10am",
+      processingStatus: "fallback_pending_retry",
+      retryCount: 0,
+      nextRetryAt: new Date(Date.now() - 1000),
+    }).returning();
+
+    // Fallback extraction
+    await aiProvider.processCapture(
+      capture.id,
+      testUserId,
+      capture.rawPayload,
+      capture.type,
+      "America/New_York",
+      { isFallback: true }
+    );
+
+    const [fallbackItem] = await db.select().from(items).where(eq(items.captureId, capture.id)).limit(1);
+    expect(fallbackItem.status).toBe("pending_review");
+
+    // Gate verification: ZERO reminders created for pending_review fallback item
+    const remindersBefore = await db.select().from(reminders).where(eq(reminders.itemId, fallbackItem.id));
+    expect(remindersBefore.length).toBe(0);
+
+    // Now trigger background retry which enriches the item with confirmed date and active status
+    await captureRetryService.retryCapture(capture);
+
+    const remindersAfter = await db.select().from(reminders).where(eq(reminders.itemId, fallbackItem.id));
+    expect(remindersAfter.length).toBeGreaterThan(0);
+  });
+
+  it("should detect fast user edit via PATCH within 2 seconds using explicit userEdited flag", async () => {
+    const [capture] = await db.insert(captures).values({
+      userId: testUserId,
+      source: "web",
+      type: "text",
+      rawPayload: "Oil change appointment",
+      processingStatus: "fallback_pending_retry",
+      retryCount: 0,
+      nextRetryAt: new Date(Date.now() - 1000),
+    }).returning();
+
+    // Fallback extraction
+    await aiProvider.processCapture(
+      capture.id,
+      testUserId,
+      capture.rawPayload,
+      capture.type,
+      "America/New_York",
+      { isFallback: true }
+    );
+
+    const [fallbackItem] = await db.select().from(items).where(eq(items.captureId, capture.id)).limit(1);
+
+    // Fast-but-real user edit via PATCH endpoint within < 2 seconds of creation
+    const token = jwt.sign({ userId: testUserId }, JWT_SECRET);
+
+    const res = await request(app)
+      .patch(`/api/v1/items/${fallbackItem.id}`)
+      .set("Cookie", `session=${token}`)
+      .send({ title: "Quickly Edited Oil Change (Under 2s)" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.item.metadata?.userEdited).toBe(true);
+
+    // Verify time difference between creation and edit is strictly less than 2000ms
+    // Under the old heuristic (timeDiff >= 2000), this edit would have been overwritten!
+    const [editedDbItem] = await db.select().from(items).where(eq(items.id, fallbackItem.id)).limit(1);
+    const timeDiff = Math.abs(editedDbItem.updatedAt.getTime() - editedDbItem.createdAt.getTime());
+    expect(timeDiff).toBeLessThan(2000);
+
+    // Trigger retry
+    await captureRetryService.retryCapture(capture);
+
+    // Verify user's edited title was preserved
+    const [afterRetry] = await db.select().from(items).where(eq(items.id, fallbackItem.id)).limit(1);
+    expect(afterRetry.title).toBe("Quickly Edited Oil Change (Under 2s)");
+    expect((afterRetry.metadata as any)?.userEdited).toBe(true);
+  });
+
+  it("should maintain stable ordering and pairing when AI retry returns 3 items reordered", async () => {
+    const [capture] = await db.insert(captures).values({
+      userId: testUserId,
+      source: "web",
+      type: "text",
+      rawPayload: "1. Pay electric bill\n2. Dentist appointment\n3. Buy groceries",
+      processingStatus: "fallback_pending_retry",
+      retryCount: 0,
+    }).returning();
+
+    // Create 3 fallback items in explicit order
+    const [item1] = await db.insert(items).values({
+      userId: testUserId,
+      captureId: capture.id,
+      title: "Pay electric bill",
+      itemType: "payment",
+      status: "pending_review",
+      createdAt: new Date(Date.now() - 3000),
+    }).returning();
+
+    const [item2] = await db.insert(items).values({
+      userId: testUserId,
+      captureId: capture.id,
+      title: "Dentist appointment",
+      itemType: "appointment",
+      status: "pending_review",
+      createdAt: new Date(Date.now() - 2000),
+    }).returning();
+
+    const [item3] = await db.insert(items).values({
+      userId: testUserId,
+      captureId: capture.id,
+      title: "Buy groceries",
+      itemType: "task",
+      status: "pending_review",
+      createdAt: new Date(Date.now() - 1000),
+    }).returning();
+
+    // User edits item 1
+    const token = jwt.sign({ userId: testUserId }, JWT_SECRET);
+    await request(app)
+      .patch(`/api/v1/items/${item1.id}`)
+      .set("Cookie", `session=${token}`)
+      .send({ title: "Electric bill paid $50" });
+
+    // AI returns 3 items in REORDERED sequence: [3: groceries, 1: electric bill, 2: dentist]
+    const reorderedAIItems = [
+      {
+        title: "Buy fresh groceries at market",
+        itemType: "task",
+        confidenceScore: 0.95,
+        dueDate: new Date("2026-10-01T10:00:00Z"),
+        metadata: { groceryList: true },
+      },
+      {
+        title: "Electric utility bill",
+        itemType: "payment",
+        confidenceScore: 0.95,
+        dueDate: new Date("2026-10-05T10:00:00Z"),
+        metadata: { utility: true },
+      },
+      {
+        title: "Dentist Checkup at 2pm",
+        itemType: "appointment",
+        confidenceScore: 0.95,
+        dueDate: new Date("2026-10-10T14:00:00Z"),
+        metadata: { doctor: true },
+      },
+    ];
+
+    // Call enrichExistingItems directly with reordered items
+    await enrichExistingItems(testUserId, capture.id, reorderedAIItems, capture.rawPayload, true, "America/New_York");
+
+    // Verify all 3 items are correctly paired:
+    // Item 1 (electric bill): preserved user edit "Electric bill paid $50"
+    const [fetchedItem1] = await db.select().from(items).where(eq(items.id, item1.id)).limit(1);
+    expect(fetchedItem1.title).toBe("Electric bill paid $50");
+
+    // Item 2 (dentist): correctly paired with Dentist Checkup at 2pm despite AI placing it 3rd!
+    const [fetchedItem2] = await db.select().from(items).where(eq(items.id, item2.id)).limit(1);
+    expect(fetchedItem2.title).toBe("Dentist Checkup at 2pm");
+    expect(fetchedItem2.itemType).toBe("appointment");
+    expect(fetchedItem2.status).toBe("active");
+
+    // Item 3 (groceries): correctly paired with Buy fresh groceries at market despite AI placing it 1st!
+    const [fetchedItem3] = await db.select().from(items).where(eq(items.id, item3.id)).limit(1);
+    expect(fetchedItem3.title).toBe("Buy fresh groceries at market");
+    expect(fetchedItem3.itemType).toBe("task");
+    expect(fetchedItem3.status).toBe("active");
   });
 });
 
