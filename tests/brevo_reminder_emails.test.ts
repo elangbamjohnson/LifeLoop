@@ -675,6 +675,9 @@ describe("Brevo Reminder Emails & MailSender Integration", () => {
       const provider = new EmailNotificationProvider();
       const result = await provider.send(
         {
+          reminderId: "rem-prod-1",
+          userId: "usr-prod-1",
+          channel: "email",
           title: "Production Mock Test",
           body: "Should fail in production with mock",
           scheduledAt: new Date(),
