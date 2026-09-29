@@ -759,6 +759,8 @@ export class ReminderService {
         const quietHoursStart = settings.quietHoursStart || "22:00";
         const quietHoursEnd = settings.quietHoursEnd || "08:00";
         const userTimezone = settings.timezone || "UTC";
+        const emailReminders = settings.emailReminders === true;
+        const isEmailVerified = user?.emailVerifiedAt != null;
 
         // 3. Quiet hours check: hold reminder if currently within quiet hours
         if (quietHoursEnabled && isTimeInQuietHours(now, quietHoursStart, quietHoursEnd, userTimezone)) {
@@ -783,8 +785,16 @@ export class ReminderService {
           continue;
         }
 
-        // 4. Dispatch via notificationDispatcher
-        const result = await notificationDispatcher.dispatch({
+        const reminderMetadata = (reminder.metadata as Record<string, any>) || {};
+        const isEmailChannel = reminder.channel === "email";
+
+        // Primary dispatch metadata: if channel is email, pass userEmail & timezone
+        const primaryMetadata = isEmailChannel
+          ? { ...reminderMetadata, userEmail: user?.email, timezone: userTimezone }
+          : { ...reminderMetadata };
+
+        // 4. Primary dispatch via notificationDispatcher
+        const primaryResult = await notificationDispatcher.dispatch({
           reminderId: reminder.id,
           userId: reminder.userId,
           title: reminder.title,
@@ -792,7 +802,56 @@ export class ReminderService {
           channel: (reminder.channel as any) || "web",
           scheduledAt: reminder.scheduledAt,
           itemId: reminder.itemId || undefined,
+          metadata: primaryMetadata,
         });
+
+        const passResults = [primaryResult];
+
+        // Secondary email dispatch if emailReminders is on, verified, and primary is not email
+        if (emailReminders && isEmailVerified && !isEmailChannel) {
+          const emailResult = await notificationDispatcher.dispatch({
+            reminderId: reminder.id,
+            userId: reminder.userId,
+            title: reminder.title,
+            body: `LifeLoop Reminder: ${reminder.title}`,
+            channel: "email",
+            scheduledAt: reminder.scheduledAt,
+            itemId: reminder.itemId || undefined,
+            metadata: { userEmail: user?.email, timezone: userTimezone },
+          });
+          passResults.push(emailResult);
+        }
+
+        const hasFailed = passResults.some((r) => r.status === "failed");
+        let activeMetadata = { ...reminderMetadata };
+
+        if (hasFailed) {
+          const attempts = ((reminderMetadata.deliveryAttempts as number) || 0) + 1;
+          if (attempts < 5) {
+            // Revert back to 'scheduled' for next retry
+            await db
+              .update(reminders)
+              .set({
+                status: "scheduled",
+                updatedAt: now,
+                metadata: {
+                  ...reminderMetadata,
+                  deliveryAttempts: attempts,
+                },
+              })
+              .where(eq(reminders.id, reminder.id));
+
+            results.push(...passResults);
+            continue;
+          } else {
+            // attempts >= 5: set metadata.deliveryFailed = true and proceed to normal sent/recurrence handling
+            activeMetadata = {
+              ...reminderMetadata,
+              deliveryAttempts: attempts,
+              deliveryFailed: true,
+            };
+          }
+        }
 
         // 5. Handle recurrence or explicit terminal status
         if (reminder.recurrence && reminder.recurrence !== "none") {
@@ -805,6 +864,10 @@ export class ReminderService {
                 status: "scheduled",
                 sentAt: now,
                 updatedAt: now,
+                metadata: {
+                  ...activeMetadata,
+                  deliveryAttempts: 0, // Reset deliveryAttempts to 0 whenever a recurring reminder advances
+                },
               })
               .where(eq(reminders.id, reminder.id));
           }
@@ -816,11 +879,12 @@ export class ReminderService {
               status: "sent",
               sentAt: now,
               updatedAt: now,
+              metadata: activeMetadata,
             })
             .where(eq(reminders.id, reminder.id));
         }
 
-        results.push(result);
+        results.push(...passResults);
         eventBus.publish(reminder.userId, {
           type: "changed",
           entity: "reminder",

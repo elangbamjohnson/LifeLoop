@@ -29,6 +29,17 @@ async function startServer() {
     if (!process.env.GEMINI_API_KEY) {
       throw new Error("FATAL: GEMINI_API_KEY environment variable is missing in production. Fix: Set GEMINI_API_KEY in your production environment variables (e.g. export GEMINI_API_KEY=\"<your_gemini_api_key>\").");
     }
+    if (process.env.EMAIL_PROVIDER === "brevo") {
+      const missingBrevoVars: string[] = [];
+      if (!process.env.BREVO_API_KEY) missingBrevoVars.push("BREVO_API_KEY");
+      if (!process.env.EMAIL_FROM_ADDRESS) missingBrevoVars.push("EMAIL_FROM_ADDRESS");
+      if (!process.env.APP_URL) missingBrevoVars.push("APP_URL");
+      if (missingBrevoVars.length > 0) {
+        throw new Error(
+          `FATAL: Missing required Brevo environment variable(s) in production: ${missingBrevoVars.join(", ")}. Fix: Set ${missingBrevoVars.join(", ")} in your production environment variables.`
+        );
+      }
+    }
   }
 
   const app = createApp();

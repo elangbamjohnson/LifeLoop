@@ -1,6 +1,7 @@
 import { db } from "../../db";
 import { notificationLogs, reminders } from "../../db/schema";
 import { eq } from "drizzle-orm";
+import { getMailSender } from "./MailSender";
 
 export type NotificationChannel = "web" | "ios" | "android" | "email";
 
@@ -140,33 +141,101 @@ export class AndroidNotificationProvider implements ChannelProvider {
   }
 }
 
-// 4. Email Notification Provider (Future-compatible Email Abstraction)
+// 4. Email Notification Provider (Brevo Transactional Email Integration)
 export class EmailNotificationProvider implements ChannelProvider {
   channel: NotificationChannel = "email";
 
   async send(payload: NotificationPayload, idempotencyKey: string): Promise<NotificationResult> {
-    const emailPayload = {
-      from: "LifeLoop Reminders <notifications@lifeloop.app>",
-      to: payload.metadata?.userEmail || "user@lifeloop.app",
-      subject: `[LifeLoop] Reminder: ${payload.title}`,
-      text: `${payload.title}\n\n${payload.body}\n\nView item: https://lifeloop.app`,
-      html: `
-        <div style="font-family: sans-serif; padding: 20px; color: #1c1917;">
-          <h2 style="margin: 0 0 10px 0;">${payload.title}</h2>
-          <p style="color: #57534e; font-size: 16px;">${payload.body}</p>
-          <a href="https://lifeloop.app" style="display: inline-block; background: #1c1917; color: #fff; padding: 10px 18px; border-radius: 8px; text-decoration: none; margin-top: 15px;">Open LifeLoop</a>
-        </div>
-      `,
-    };
+    const recipient = payload.metadata?.userEmail;
+    if (!recipient) {
+      return {
+        success: false,
+        channel: this.channel,
+        status: "failed",
+        idempotencyKey,
+        error: "no recipient",
+      };
+    }
 
-    return {
-      success: true,
-      channel: this.channel,
-      status: "delivered",
-      idempotencyKey,
-      deliveredAt: new Date(),
-      payload: emailPayload,
-    };
+    const tz = payload.metadata?.timezone || "UTC";
+    let formattedDue = "";
+    try {
+      formattedDue = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        dateStyle: "full",
+        timeStyle: "short",
+      }).format(new Date(payload.scheduledAt));
+    } catch {
+      try {
+        formattedDue = new Intl.DateTimeFormat("en-US", {
+          timeZone: "UTC",
+          dateStyle: "full",
+          timeStyle: "short",
+        }).format(new Date(payload.scheduledAt));
+      } catch {
+        formattedDue = new Date(payload.scheduledAt).toUTCString();
+      }
+    }
+
+    const escapeHtml = (str: string) =>
+      str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+
+    const safeTitle = escapeHtml(payload.title || "");
+    const safeBody = escapeHtml(payload.body || "");
+    const safeDue = escapeHtml(formattedDue);
+
+    // Keep subject to one line (strip newlines, cap ~120 chars)
+    const rawSubject = `[LifeLoop] Reminder: ${payload.title}`.replace(/[\r\n]+/g, " ").trim();
+    const subject = rawSubject.length > 120 ? rawSubject.slice(0, 117) + "..." : rawSubject;
+
+    const appUrl = (process.env.APP_URL || "").replace(/\/+$/, "");
+    const itemLink = appUrl ? `${appUrl}` : "";
+
+    const text = `${payload.title}\n\nDue: ${formattedDue}\n\n${payload.body}${itemLink ? `\n\nView item: ${itemLink}` : ""}`;
+    const html = `
+      <div style="font-family: sans-serif; padding: 20px; color: #1c1917;">
+        <h2 style="margin: 0 0 10px 0;">${safeTitle}</h2>
+        <p style="color: #78716c; font-size: 14px; margin: 0 0 10px 0;"><strong>Due:</strong> ${safeDue}</p>
+        <p style="color: #57534e; font-size: 16px;">${safeBody}</p>
+        ${itemLink ? `<a href="${itemLink}" style="display: inline-block; background: #1c1917; color: #fff; padding: 10px 18px; border-radius: 8px; text-decoration: none; margin-top: 15px;">Open LifeLoop</a>` : ""}
+      </div>
+    `.trim();
+
+    const sender = getMailSender();
+    const sendResult = await sender.send({
+      to: recipient,
+      subject,
+      text,
+      html,
+    });
+
+    if (sendResult.ok) {
+      return {
+        success: true,
+        channel: this.channel,
+        status: "delivered",
+        idempotencyKey,
+        deliveredAt: new Date(),
+        payload: {
+          to: recipient,
+          subject,
+          messageId: sendResult.messageId,
+        },
+      };
+    } else {
+      return {
+        success: false,
+        channel: this.channel,
+        status: "failed",
+        idempotencyKey,
+        error: sendResult.error,
+      };
+    }
   }
 }
 
@@ -202,14 +271,14 @@ export class NotificationDispatcher {
       payload.channel
     );
 
-    // 1. Idempotency Check: check if already sent in DB
+    // 1. Idempotency Check: only rows with status "delivered" or "queued" block resend
     const [existing] = await db
       .select()
       .from(notificationLogs)
       .where(eq(notificationLogs.idempotencyKey, idempotencyKey))
       .limit(1);
 
-    if (existing) {
+    if (existing && (existing.status === "delivered" || existing.status === "queued")) {
       // Duplicate notification blocked!
       return {
         success: true,
@@ -224,18 +293,38 @@ export class NotificationDispatcher {
     // 2. Dispatch via channel provider
     const result = await provider.send(payload, idempotencyKey);
 
-    // 3. Persist to notification logs table
-    await db.insert(notificationLogs).values({
-      reminderId: payload.reminderId,
-      userId: payload.userId,
-      channel: payload.channel,
-      idempotencyKey,
-      status: result.status,
-      deliveredAt: result.deliveredAt || null,
-      payload: result.payload || {},
-    });
+    // 3. Persist to notification logs table (update existing failed row or insert new)
+    if (existing) {
+      await db
+        .update(notificationLogs)
+        .set({
+          status: result.status,
+          deliveredAt: result.deliveredAt || null,
+          payload: result.payload || {},
+          updatedAt: new Date(),
+        })
+        .where(eq(notificationLogs.id, existing.id));
+    } else {
+      await db.insert(notificationLogs).values({
+        reminderId: payload.reminderId,
+        userId: payload.userId,
+        channel: payload.channel,
+        idempotencyKey,
+        status: result.status,
+        deliveredAt: result.deliveredAt || null,
+        payload: result.payload || {},
+      });
+    }
 
     // 4. Update reminder status
+    // If result.status is "failed": log it, and do NOT update the reminder status to sent/scheduled here.
+    if (result.status === "failed") {
+      console.warn(
+        `[NotificationDispatcher] Dispatch failed for reminder ${payload.reminderId} via ${payload.channel}: ${result.error}`
+      );
+      return result;
+    }
+
     await db
       .update(reminders)
       .set({
@@ -249,3 +338,4 @@ export class NotificationDispatcher {
 }
 
 export const notificationDispatcher = new NotificationDispatcher();
+

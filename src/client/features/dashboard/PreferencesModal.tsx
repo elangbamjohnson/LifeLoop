@@ -9,6 +9,7 @@ interface PreferencesModalProps {
 
 export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
   const [autoReminders, setAutoReminders] = useState(false);
+  const [emailReminders, setEmailReminders] = useState(false);
   const [channels, setChannels] = useState<string[]>(["web"]);
 
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(false);
@@ -28,6 +29,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
       .then((data) => {
         if (data?.preferences) {
           setAutoReminders(data.preferences.autoReminders ?? false);
+          setEmailReminders(data.preferences.emailReminders ?? false);
           setChannels(data.preferences.channels || ["web"]);
 
           setQuietHoursEnabled(data.preferences.quietHoursEnabled ?? false);
@@ -89,6 +91,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
         headers: { "Content-Type": "application/json", "X-Client-Id": getTabClientId() },
         body: JSON.stringify({
           autoReminders,
+          emailReminders,
           channels,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           quietHoursEnabled,
@@ -196,6 +199,45 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
               <div
                 className={`w-[22px] h-[22px] rounded-full bg-white dark:bg-[#1C1917] transition-transform duration-200 shadow-sm ${
                   autoReminders ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </div>
+          </div>
+
+          {/* Section A2: Email Reminders Toggle Card */}
+          <div
+            id="email-reminders-row"
+            role="switch"
+            tabIndex={0}
+            aria-checked={emailReminders}
+            aria-label="Email Reminders"
+            onClick={() => setEmailReminders(!emailReminders)}
+            onKeyDown={(e) => {
+              if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                setEmailReminders(!emailReminders);
+              }
+            }}
+            className="touch-target-48 min-h-[48px] p-4 rounded-2xl bg-stone-50 dark:bg-stone-800/50 border border-stone-200 dark:border-stone-700 flex items-center justify-between gap-4 cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 transition-colors hover:bg-stone-100/70 dark:hover:bg-stone-800/80"
+          >
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium text-[#1C1917] dark:text-[#FDFBF7] block">
+                Email me reminders
+              </span>
+              <p className="text-xs text-[#78716C] dark:text-[#A8A29E] mt-0.5 leading-relaxed">
+                Receive reminder notifications directly in your inbox. Requires a verified email address.
+              </p>
+            </div>
+            {/* Visual switch: 48px width x 28px height */}
+            <div
+              aria-hidden="true"
+              className={`w-12 h-7 rounded-full transition-colors flex items-center p-0.5 shrink-0 ${
+                emailReminders ? "bg-[#1C1917] dark:bg-[#FDFBF7]" : "bg-stone-300 dark:bg-stone-700"
+              }`}
+            >
+              <div
+                className={`w-[22px] h-[22px] rounded-full bg-white dark:bg-[#1C1917] transition-transform duration-200 shadow-sm ${
+                  emailReminders ? "translate-x-5" : "translate-x-0"
                 }`}
               />
             </div>
