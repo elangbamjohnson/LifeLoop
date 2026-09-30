@@ -54,6 +54,7 @@ export function CaptureDialog({ isOpen, onClose, onSubmit, isAdmin: propIsAdmin 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     if (!text && !file) return;
 
     setLoading(true);
@@ -72,9 +73,12 @@ export function CaptureDialog({ isOpen, onClose, onSubmit, isAdmin: propIsAdmin 
       setText("");
       setFile(null);
       onClose();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Submit error", error);
-      setErrorMessage("Failed to save capture. Please try again.");
+      const msg = error?.message && typeof error.message === "string" && error.message.trim()
+        ? error.message.trim()
+        : "Couldn't save. Please try again.";
+      setErrorMessage(msg);
     } finally {
       setLoading(false);
     }
@@ -100,7 +104,10 @@ export function CaptureDialog({ isOpen, onClose, onSubmit, isAdmin: propIsAdmin 
             <button
               id="capture-tab-text"
               type="button"
-              onClick={() => setActiveTab("text")}
+              onClick={() => {
+                setActiveTab("text");
+                if (errorMessage) setErrorMessage(null);
+              }}
               className={`touch-target-48 min-h-[48px] px-4 py-2 text-sm font-medium rounded-xl transition-all flex items-center ${
                 activeTab === "text" 
                   ? "bg-white dark:bg-[#44403C] text-black dark:text-white shadow-xs" 
@@ -114,7 +121,10 @@ export function CaptureDialog({ isOpen, onClose, onSubmit, isAdmin: propIsAdmin 
               <button
                 id="capture-tab-media"
                 type="button"
-                onClick={() => setActiveTab("media")}
+                onClick={() => {
+                  setActiveTab("media");
+                  if (errorMessage) setErrorMessage(null);
+                }}
                 className={`touch-target-48 min-h-[48px] px-4 py-2 text-sm font-medium rounded-xl transition-all flex items-center ${
                   activeTab === "media" 
                     ? "bg-white dark:bg-[#44403C] text-black dark:text-white shadow-xs" 
@@ -139,9 +149,18 @@ export function CaptureDialog({ isOpen, onClose, onSubmit, isAdmin: propIsAdmin 
         </div>
 
         {errorMessage && (
-          <div role="alert" className="mx-4 mt-3 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs rounded-xl flex items-center justify-between">
-            <span>{errorMessage}</span>
-            <button type="button" onClick={() => setErrorMessage(null)} className="text-rose-500 hover:text-rose-700 p-1">
+          <div
+            id="capture-error-alert"
+            role="alert"
+            className="mx-4 mt-3 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs rounded-xl flex items-center justify-between gap-2 overflow-hidden"
+          >
+            <span className="break-words min-w-0 flex-1">{errorMessage}</span>
+            <button
+              type="button"
+              onClick={() => setErrorMessage(null)}
+              aria-label="Dismiss error"
+              className="touch-target-48 min-w-[48px] min-h-[48px] flex items-center justify-center text-rose-500 hover:text-rose-700 dark:hover:text-rose-200 transition-colors shrink-0"
+            >
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -151,7 +170,10 @@ export function CaptureDialog({ isOpen, onClose, onSubmit, isAdmin: propIsAdmin 
           {activeTab === "text" ? (
             <textarea
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => {
+                setText(e.target.value);
+                if (errorMessage) setErrorMessage(null);
+              }}
               placeholder="What's on your mind? Drop any thought, task, or note here..."
               className="w-full h-40 bg-transparent text-lg resize-none outline-none text-[#1C1917] dark:text-[#FDFBF7] placeholder:text-[#A8A29E]"
               autoFocus
@@ -162,7 +184,10 @@ export function CaptureDialog({ isOpen, onClose, onSubmit, isAdmin: propIsAdmin 
                 type="file"
                 ref={fileInputRef}
                 className="hidden"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                onChange={(e) => {
+                  setFile(e.target.files?.[0] || null);
+                  if (errorMessage) setErrorMessage(null);
+                }}
                 accept="image/*,audio/*,.pdf,.doc,.docx"
               />
               {file ? (
@@ -171,7 +196,10 @@ export function CaptureDialog({ isOpen, onClose, onSubmit, isAdmin: propIsAdmin 
                   <p className="text-sm text-[#78716C]">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                   <button
                     type="button"
-                    onClick={() => setFile(null)}
+                    onClick={() => {
+                      setFile(null);
+                      if (errorMessage) setErrorMessage(null);
+                    }}
                     className="mt-2 text-sm text-red-500 hover:underline"
                   >
                     Remove

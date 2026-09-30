@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { X, Bell, Globe, Moon, ShieldCheck, Check, Loader2 } from "lucide-react";
 import { getTabClientId } from "../../utils/tabId";
+import { extractApiErrorMessage, NETWORK_ERROR_MESSAGE } from "../../lib/apiError";
 
 interface PreferencesModalProps {
   isOpen: boolean;
@@ -20,9 +21,11 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
   );
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
+    setErrorMessage(null);
 
     fetch("/api/v1/reminders/preferences")
       .then((res) => res.json())
@@ -75,6 +78,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
   };
 
   const toggleChannel = (ch: string) => {
+    if (errorMessage) setErrorMessage(null);
     setChannels((prev) =>
       prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]
     );
@@ -82,33 +86,48 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving) return;
     setSaving(true);
     setSavedSuccess(false);
+    setErrorMessage(null);
 
     try {
-      const res = await fetch("/api/v1/reminders/preferences", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", "X-Client-Id": getTabClientId() },
-        body: JSON.stringify({
-          autoReminders,
-          emailReminders,
-          channels,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          quietHoursEnabled,
-          quietHoursStart,
-          quietHoursEnd,
-        }),
-      });
-
-      if (res.ok) {
-        setSavedSuccess(true);
-        setTimeout(() => {
-          setSavedSuccess(false);
-          onClose();
-        }, 800);
+      let res: Response;
+      try {
+        res = await fetch("/api/v1/reminders/preferences", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "X-Client-Id": getTabClientId() },
+          body: JSON.stringify({
+            autoReminders,
+            emailReminders,
+            channels,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            quietHoursEnabled,
+            quietHoursStart,
+            quietHoursEnd,
+          }),
+        });
+      } catch {
+        throw new Error(NETWORK_ERROR_MESSAGE);
       }
-    } catch (err) {
+
+      if (!res.ok) {
+        const msg = await extractApiErrorMessage(res);
+        throw new Error(msg);
+      }
+
+      setSavedSuccess(true);
+      setTimeout(() => {
+        setSavedSuccess(false);
+        onClose();
+      }, 800);
+    } catch (err: any) {
       console.error("Save error:", err);
+      const msg =
+        err?.message && typeof err.message === "string" && err.message.trim()
+          ? err.message.trim()
+          : "Couldn't save. Please try again.";
+      setErrorMessage(msg);
     } finally {
       setSaving(false);
     }
@@ -162,6 +181,24 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
           </div>
         </div>
 
+        {errorMessage && (
+          <div
+            id="preferences-error-alert"
+            role="alert"
+            className="mx-5 mt-4 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs rounded-xl flex items-center justify-between gap-2 overflow-hidden shrink-0"
+          >
+            <span className="break-words min-w-0 flex-1">{errorMessage}</span>
+            <button
+              type="button"
+              onClick={() => setErrorMessage(null)}
+              aria-label="Dismiss error"
+              className="touch-target-48 min-w-[48px] min-h-[48px] flex items-center justify-center text-rose-500 hover:text-rose-700 dark:hover:text-rose-200 transition-colors shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         <form onSubmit={handleSave} className="flex flex-col flex-1 min-h-0 overflow-hidden">
           {/* Scrollable Form Content */}
           <div className="overflow-y-auto overscroll-contain flex-1 p-5 sm:p-7 space-y-6">
@@ -172,10 +209,14 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
             tabIndex={0}
             aria-checked={autoReminders}
             aria-label="Automatic Reminders"
-            onClick={() => setAutoReminders(!autoReminders)}
+            onClick={() => {
+              if (errorMessage) setErrorMessage(null);
+              setAutoReminders(!autoReminders);
+            }}
             onKeyDown={(e) => {
               if (e.key === " " || e.key === "Enter") {
                 e.preventDefault();
+                if (errorMessage) setErrorMessage(null);
                 setAutoReminders(!autoReminders);
               }
             }}
@@ -211,10 +252,14 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
             tabIndex={0}
             aria-checked={emailReminders}
             aria-label="Email Reminders"
-            onClick={() => setEmailReminders(!emailReminders)}
+            onClick={() => {
+              if (errorMessage) setErrorMessage(null);
+              setEmailReminders(!emailReminders);
+            }}
             onKeyDown={(e) => {
               if (e.key === " " || e.key === "Enter") {
                 e.preventDefault();
+                if (errorMessage) setErrorMessage(null);
                 setEmailReminders(!emailReminders);
               }
             }}
@@ -307,10 +352,14 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
               tabIndex={0}
               aria-checked={quietHoursEnabled}
               aria-label="Quiet Hours"
-              onClick={() => setQuietHoursEnabled(!quietHoursEnabled)}
+              onClick={() => {
+                if (errorMessage) setErrorMessage(null);
+                setQuietHoursEnabled(!quietHoursEnabled);
+              }}
               onKeyDown={(e) => {
                 if (e.key === " " || e.key === "Enter") {
                   e.preventDefault();
+                  if (errorMessage) setErrorMessage(null);
                   setQuietHoursEnabled(!quietHoursEnabled);
                 }
               }}
@@ -350,7 +399,10 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
                   <input
                     type="time"
                     value={quietHoursStart}
-                    onChange={(e) => setQuietHoursStart(e.target.value)}
+                    onChange={(e) => {
+                      if (errorMessage) setErrorMessage(null);
+                      setQuietHoursStart(e.target.value);
+                    }}
                     className="w-full px-3 py-2.5 min-h-[48px] rounded-xl border border-[#E7E5E4] dark:border-[#44403C] bg-white dark:bg-[#1C1917] text-base text-[#1C1917] dark:text-[#FDFBF7] focus:outline-none focus:ring-1 focus:ring-amber-500"
                   />
                 </div>
@@ -359,7 +411,10 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
                   <input
                     type="time"
                     value={quietHoursEnd}
-                    onChange={(e) => setQuietHoursEnd(e.target.value)}
+                    onChange={(e) => {
+                      if (errorMessage) setErrorMessage(null);
+                      setQuietHoursEnd(e.target.value);
+                    }}
                     className="w-full px-3 py-2.5 min-h-[48px] rounded-xl border border-[#E7E5E4] dark:border-[#44403C] bg-white dark:bg-[#1C1917] text-base text-[#1C1917] dark:text-[#FDFBF7] focus:outline-none focus:ring-1 focus:ring-amber-500"
                   />
                 </div>
