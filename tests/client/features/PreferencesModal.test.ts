@@ -83,4 +83,36 @@ describe('PreferencesModal Save Error Handling', () => {
     );
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('shows changes wording on 500 error and never contains the word "note"', async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url.includes('/api/v1/reminders/preferences') && init?.method === 'PUT') {
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({ error: 'Internal Server Error' }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ preferences: {} }),
+      } as Response;
+    });
+
+    render(React.createElement(PreferencesModal, { isOpen: true, onClose }));
+
+    const saveButton = screen.getByRole('button', { name: /save preferences/i });
+    fireEvent.click(saveButton);
+
+    await vi.waitFor(() => {
+      expect(screen.getByRole('alert')).not.toBeNull();
+    });
+
+    const alertText = screen.getByRole('alert').textContent || '';
+    expect(alertText).toBe("Something went wrong on our side. Your changes are still here, please try again.");
+    expect(alertText.toLowerCase()).not.toContain('note');
+    expect(onClose).not.toHaveBeenCalled();
+    expect((saveButton as HTMLButtonElement).disabled).toBe(false);
+  });
 });

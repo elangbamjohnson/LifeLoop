@@ -112,7 +112,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
       }
 
       if (!res.ok) {
-        const msg = await extractApiErrorMessage(res);
+        const msg = await extractApiErrorMessage(res, "changes");
         throw new Error(msg);
       }
 

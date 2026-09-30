@@ -17,7 +17,11 @@ export function isShortString(str: unknown, maxLen = 200): str is string {
   return true;
 }
 
-export function formatApiErrorMessage(status: number, data?: any): string {
+export function formatApiErrorMessage(
+  status: number,
+  data?: any,
+  subject: "note" | "changes" = "note"
+): string {
   if (status === 401) {
     return "Your session has expired. Please sign in again.";
   }
@@ -31,7 +35,8 @@ export function formatApiErrorMessage(status: number, data?: any): string {
   }
 
   if (status >= 500 && status <= 599) {
-    return "Something went wrong on our side. Your note is still here, please try again.";
+    const verb = subject === "changes" ? "are" : "is";
+    return `Something went wrong on our side. Your ${subject} ${verb} still here, please try again.`;
   }
 
   const serverError = data && typeof data === "object" ? data.error : undefined;
@@ -54,12 +59,37 @@ export function formatApiErrorMessage(status: number, data?: any): string {
   return "Couldn't save. Please try again.";
 }
 
-export async function extractApiErrorMessage(res: Response): Promise<string> {
+export async function extractApiErrorMessage(
+  res: Response,
+  subject?: "note" | "changes"
+): Promise<string>;
+export async function extractApiErrorMessage(
+  res: Response,
+  data?: any,
+  subject?: "note" | "changes"
+): Promise<string>;
+export async function extractApiErrorMessage(
+  res: Response,
+  arg2?: "note" | "changes" | any,
+  arg3: "note" | "changes" = "note"
+): Promise<string> {
+  let subject: "note" | "changes" = "note";
   let data: any = null;
-  try {
-    data = await res.json();
-  } catch {
-    // Non-JSON response body (empty, text, HTML 500, etc.)
+
+  if (arg2 === "note" || arg2 === "changes") {
+    subject = arg2;
+  } else {
+    data = arg2;
+    subject = arg3;
   }
-  return formatApiErrorMessage(res.status, data);
+
+  if (data === null || data === undefined) {
+    try {
+      data = await res.json();
+    } catch {
+      // Non-JSON response body (empty, text, HTML 500, etc.)
+    }
+  }
+
+  return formatApiErrorMessage(res.status, data, subject);
 }

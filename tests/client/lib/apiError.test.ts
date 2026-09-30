@@ -24,12 +24,18 @@ describe("apiError status-to-message mapping", () => {
     });
 
     it("returns friendly message for 5xx and never leaks raw server error or stack traces", () => {
-      const expected = "Something went wrong on our side. Your note is still here, please try again.";
-      expect(formatApiErrorMessage(500)).toBe(expected);
-      expect(formatApiErrorMessage(500, { error: "pg_query: syntax error at or near 'SELECT'" })).toBe(expected);
-      expect(formatApiErrorMessage(502, { error: "Bad Gateway" })).toBe(expected);
-      expect(formatApiErrorMessage(503, { error: "Service Unavailable" })).toBe(expected);
-      expect(formatApiErrorMessage(504, { stack: "Error: at line 42" })).toBe(expected);
+      const expectedNote = "Something went wrong on our side. Your note is still here, please try again.";
+      expect(formatApiErrorMessage(500)).toBe(expectedNote);
+      expect(formatApiErrorMessage(500, undefined, "note")).toBe(expectedNote);
+      expect(formatApiErrorMessage(500, { error: "pg_query: syntax error at or near 'SELECT'" })).toBe(expectedNote);
+      expect(formatApiErrorMessage(502, { error: "Bad Gateway" })).toBe(expectedNote);
+      expect(formatApiErrorMessage(503, { error: "Service Unavailable" })).toBe(expectedNote);
+      expect(formatApiErrorMessage(504, { stack: "Error: at line 42" })).toBe(expectedNote);
+
+      const expectedChanges = "Something went wrong on our side. Your changes are still here, please try again.";
+      expect(formatApiErrorMessage(500, undefined, "changes")).toBe(expectedChanges);
+      expect(formatApiErrorMessage(500, { error: "pg_query: syntax error" }, "changes")).toBe(expectedChanges);
+      expect(formatApiErrorMessage(503, { error: "Service Unavailable" }, "changes")).toBe(expectedChanges);
     });
 
     it("handles 403: uses short error string if present, else fallback", () => {
@@ -82,10 +88,20 @@ describe("apiError status-to-message mapping", () => {
       expect(msg).toBe("Custom 400 error");
     });
 
-    it("handles empty body safely", async () => {
+    it("handles empty body safely with default 'note' subject", async () => {
       const res = new Response("", { status: 500 });
       const msg = await extractApiErrorMessage(res);
       expect(msg).toBe("Something went wrong on our side. Your note is still here, please try again.");
+    });
+
+    it("handles 500 with 'changes' subject via 2nd or 3rd argument", async () => {
+      const res1 = new Response("", { status: 500 });
+      const msg1 = await extractApiErrorMessage(res1, "changes");
+      expect(msg1).toBe("Something went wrong on our side. Your changes are still here, please try again.");
+
+      const res2 = new Response(JSON.stringify({ error: "Server exploded" }), { status: 500 });
+      const msg2 = await extractApiErrorMessage(res2, undefined, "changes");
+      expect(msg2).toBe("Something went wrong on our side. Your changes are still here, please try again.");
     });
 
     it("handles non-JSON body safely", async () => {

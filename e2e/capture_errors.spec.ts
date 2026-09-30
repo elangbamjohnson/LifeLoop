@@ -167,8 +167,9 @@ test.describe('Capture Dialog Error Handling (POST /api/v1/captures)', () => {
     await expect(prefsCard).toBeVisible();
     await expect(alertLocator).toBeVisible({ timeout: 5000 });
     await expect(alertLocator).toContainText(
-      'Something went wrong on our side. Your note is still here, please try again.'
+      'Something went wrong on our side. Your changes are still here, please try again.'
     );
+    await expect(alertLocator).not.toContainText('note');
     await expect(saveBtn).toBeEnabled();
 
     // 2. Toggling setting clears error alert
