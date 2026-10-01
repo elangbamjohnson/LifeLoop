@@ -38,9 +38,54 @@ import { groupItemsIntoTimeline, TimelineItem, TimelineGrouping } from "../../..
 import { FamilyPage } from "../family/FamilyPage";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { useDashboardPolling, Capture } from "../../hooks/useDashboardPolling";
+import { extractApiErrorMessage, NETWORK_ERROR_MESSAGE } from "../../lib/apiError";
 import { useLiveSync } from "../../hooks/useLiveSync";
 import { useNow } from "../../hooks/useNow";
 import { getTabClientId } from "../../utils/tabId";
+
+// Capture submission handler
+export async function submitCapture(
+  data: { type: string; payload: string | File },
+  options?: {
+    tabId?: string;
+    showToast?: (msg: string) => void;
+    fetchData?: () => void;
+  }
+) {
+  const formData = new FormData();
+  formData.append("type", data.type);
+  formData.append("source", "web");
+
+  if (typeof data.payload === "string") {
+    formData.append("rawPayload", data.payload);
+  } else {
+    formData.append("file", data.payload);
+  }
+
+  let res: Response;
+  try {
+    res = await fetch("/api/v1/captures", {
+      method: "POST",
+      headers: { 
+        "X-Client-Id": options?.tabId || "",
+        "X-Timezone": Intl.DateTimeFormat().resolvedOptions().timeZone
+      },
+      body: formData,
+    });
+  } catch {
+    throw new Error(NETWORK_ERROR_MESSAGE);
+  }
+
+  if (!res.ok) {
+    const msg = await extractApiErrorMessage(res);
+    throw new Error(msg);
+  }
+
+  options?.showToast?.("Captured! LifeLoop AI is organizing it in the background.");
+  options?.fetchData?.();
+}
+
+export { submitCapture as handleCaptureSubmit };
 
 export function Dashboard() {
   const { user, loading: authLoading, logout } = useAuth();
@@ -289,28 +334,7 @@ export function Dashboard() {
 
   // Capture submission handler
   const handleCaptureSubmit = async (data: { type: string; payload: string | File }) => {
-    const formData = new FormData();
-    formData.append("type", data.type);
-    formData.append("source", "web");
-
-    if (typeof data.payload === "string") {
-      formData.append("rawPayload", data.payload);
-    } else {
-      formData.append("file", data.payload);
-    }
-
-    const res = await fetch("/api/v1/captures", {
-      method: "POST",
-      headers: { 
-        "X-Client-Id": tabId,
-        "X-Timezone": Intl.DateTimeFormat().resolvedOptions().timeZone
-      },
-      body: formData,
-    });
-    if (res.ok) {
-      showToast("Captured! LifeLoop AI is organizing it in the background.");
-      fetchData();
-    }
+    await submitCapture(data, { tabId, showToast, fetchData });
   };
 
   // Toggle complete

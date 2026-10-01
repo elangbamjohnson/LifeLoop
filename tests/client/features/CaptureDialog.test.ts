@@ -124,3 +124,225 @@ describe('CaptureDialog Admin Media Option Gating', () => {
     expect(onSubmit).toHaveBeenCalledWith({ type: 'text', payload: 'Buy groceries' });
   });
 });
+
+describe('CaptureDialog Save Error Handling & Form State Retention', () => {
+  const onClose = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('keeps dialog open, keeps text and file, shows error with role="alert", and re-enables save button on failure', async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new Error("Please verify your email address to access this resource"));
+
+    render(
+      React.createElement(CaptureDialog, {
+        isOpen: true,
+        onClose,
+        onSubmit,
+        isAdmin: true,
+      })
+    );
+
+    const textarea = screen.getByPlaceholderText(/what's on your mind/i) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Important meeting notes' } });
+    expect(textarea.value).toBe('Important meeting notes');
+
+    const saveButton = screen.getByRole('button', { name: /save to lifeloop/i });
+    fireEvent.click(saveButton);
+
+    // Wait for async rejection to be processed
+    await vi.waitFor(() => {
+      expect(screen.getByRole('alert')).not.toBeNull();
+    });
+
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('Please verify your email address to access this resource');
+
+    // Dialog stays open: onClose was NOT called
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Text is still preserved
+    expect(textarea.value).toBe('Important meeting notes');
+
+    // Save button is re-enabled
+    expect((saveButton as HTMLButtonElement).disabled).toBe(false);
+
+    // Editing the text clears the error alert
+    fireEvent.change(textarea, { target: { value: 'Important meeting notes edited' } });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('clears text and closes dialog on successful submission', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      React.createElement(CaptureDialog, {
+        isOpen: true,
+        onClose,
+        onSubmit,
+        isAdmin: true,
+      })
+    );
+
+    const textarea = screen.getByPlaceholderText(/what's on your mind/i) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Grocery list' } });
+
+    const saveButton = screen.getByRole('button', { name: /save to lifeloop/i });
+    fireEvent.click(saveButton);
+
+    await vi.waitFor(() => {
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    expect(textarea.value).toBe('');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('prevents double submission: clicking save twice while in flight only invokes onSubmit once', async () => {
+    let resolveSubmission: () => void = () => {};
+    const pendingPromise = new Promise<void>((resolve) => {
+      resolveSubmission = resolve;
+    });
+    const onSubmit = vi.fn().mockReturnValue(pendingPromise);
+
+    render(
+      React.createElement(CaptureDialog, {
+        isOpen: true,
+        onClose,
+        onSubmit,
+        isAdmin: true,
+      })
+    );
+
+    const textarea = screen.getByPlaceholderText(/what's on your mind/i);
+    fireEvent.change(textarea, { target: { value: 'Single submit note' } });
+
+    const saveButton = screen.getByRole('button', { name: /save to lifeloop/i });
+    // First click initiates request
+    fireEvent.click(saveButton);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+
+    // Second click during in-flight request should be ignored
+    fireEvent.click(saveButton);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+
+    // Resolve the promise
+    resolveSubmission();
+    await vi.waitFor(() => {
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('shows 500 error in the dialog and keeps dialog open and text kept', async () => {
+    const onSubmit = vi.fn().mockRejectedValue(
+      new Error("Something went wrong on our side. Your note is still here, please try again.")
+    );
+
+    render(
+      React.createElement(CaptureDialog, {
+        isOpen: true,
+        onClose,
+        onSubmit,
+        isAdmin: true,
+      })
+    );
+
+    const textarea = screen.getByPlaceholderText(/what's on your mind/i) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'My 500 test note' } });
+
+    const saveButton = screen.getByRole('button', { name: /save to lifeloop/i });
+    fireEvent.click(saveButton);
+
+    await vi.waitFor(() => {
+      expect(screen.getByRole('alert')).not.toBeNull();
+    });
+
+    expect(screen.getByRole('alert').textContent).toBe(
+      "Something went wrong on our side. Your note is still here, please try again."
+    );
+    expect(onClose).not.toHaveBeenCalled();
+    expect(textarea.value).toBe('My 500 test note');
+    expect((saveButton as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('shows network abort error in the dialog and keeps dialog open and text kept', async () => {
+    const onSubmit = vi.fn().mockRejectedValue(
+      new Error("Couldn't reach the server. Check your connection and try again.")
+    );
+
+    render(
+      React.createElement(CaptureDialog, {
+        isOpen: true,
+        onClose,
+        onSubmit,
+        isAdmin: true,
+      })
+    );
+
+    const textarea = screen.getByPlaceholderText(/what's on your mind/i) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'My network abort test note' } });
+
+    const saveButton = screen.getByRole('button', { name: /save to lifeloop/i });
+    fireEvent.click(saveButton);
+
+    await vi.waitFor(() => {
+      expect(screen.getByRole('alert')).not.toBeNull();
+    });
+
+    expect(screen.getByRole('alert').textContent).toBe(
+      "Couldn't reach the server. Check your connection and try again."
+    );
+    expect(onClose).not.toHaveBeenCalled();
+    expect(textarea.value).toBe('My network abort test note');
+    expect((saveButton as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('keeps attached file on failure when submitting media as admin', async () => {
+    const onSubmit = vi.fn().mockRejectedValue(
+      new Error("Something went wrong on our side. Your note is still here, please try again.")
+    );
+
+    render(
+      React.createElement(CaptureDialog, {
+        isOpen: true,
+        onClose,
+        onSubmit,
+        isAdmin: true,
+      })
+    );
+
+    // Switch to Media tab
+    const mediaTab = screen.getByRole('button', { name: /media/i });
+    fireEvent.click(mediaTab);
+
+    // Attach a file
+    const file = new File(['mock content'], 'test-recording.mp3', { type: 'audio/mp3' });
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    // File name is shown in the UI
+    expect(screen.getByText('test-recording.mp3')).not.toBeNull();
+
+    const saveButton = screen.getByRole('button', { name: /save to lifeloop/i });
+    fireEvent.click(saveButton);
+
+    await vi.waitFor(() => {
+      expect(screen.getByRole('alert')).not.toBeNull();
+    });
+
+    // Alert is shown
+    expect(screen.getByRole('alert').textContent).toContain('Your note is still here');
+    // Dialog stays open
+    expect(onClose).not.toHaveBeenCalled();
+    // Attached file is kept in UI
+    expect(screen.getByText('test-recording.mp3')).not.toBeNull();
+    // Save button re-enabled
+    expect((saveButton as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
