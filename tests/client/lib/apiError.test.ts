@@ -38,6 +38,12 @@ describe("apiError status-to-message mapping", () => {
       expect(formatApiErrorMessage(503, { error: "Service Unavailable" }, "changes")).toBe(expectedChanges);
     });
 
+    it("defaults subject to 'note' when subject argument is omitted in formatApiErrorMessage", () => {
+      expect(formatApiErrorMessage(500)).toBe(
+        "Something went wrong on our side. Your note is still here, please try again."
+      );
+    });
+
     it("handles 403: uses short error string if present, else fallback", () => {
       expect(
         formatApiErrorMessage(403, { error: "Please verify your email address to access this resource" })
@@ -92,6 +98,13 @@ describe("apiError status-to-message mapping", () => {
       const res = new Response("", { status: 500 });
       const msg = await extractApiErrorMessage(res);
       expect(msg).toBe("Something went wrong on our side. Your note is still here, please try again.");
+    });
+
+    it("defaults subject to 'note' when subject argument is omitted in extractApiErrorMessage", async () => {
+      const res = new Response("", { status: 500 });
+      expect(await extractApiErrorMessage(res)).toBe(
+        "Something went wrong on our side. Your note is still here, please try again."
+      );
     });
 
     it("handles 500 with 'changes' subject via 2nd or 3rd argument", async () => {

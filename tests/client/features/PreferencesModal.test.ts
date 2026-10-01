@@ -84,13 +84,22 @@ describe('PreferencesModal Save Error Handling', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('shows changes wording on 500 error and never contains the word "note"', async () => {
+  it('shows changes wording on 500 error, never contains the word "note", keeps modal open, and save button works again', async () => {
+    let putCalls = 0;
     global.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
       if (typeof url === 'string' && url.includes('/api/v1/reminders/preferences') && init?.method === 'PUT') {
+        putCalls++;
+        if (putCalls === 1) {
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({ error: 'Internal Server Error' }),
+          } as Response;
+        }
         return {
-          ok: false,
-          status: 500,
-          json: async () => ({ error: 'Internal Server Error' }),
+          ok: true,
+          status: 200,
+          json: async () => ({ preferences: {} }),
         } as Response;
       }
       return {
@@ -114,5 +123,11 @@ describe('PreferencesModal Save Error Handling', () => {
     expect(alertText.toLowerCase()).not.toContain('note');
     expect(onClose).not.toHaveBeenCalled();
     expect((saveButton as HTMLButtonElement).disabled).toBe(false);
+
+    // Save button works again: clicking it retries and succeeds, closing the modal
+    fireEvent.click(saveButton);
+    await vi.waitFor(() => {
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
   });
 });
