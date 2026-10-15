@@ -6,7 +6,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildIcs } from "../src/shared/utils/calendar";
+import {
+  buildIcs,
+  getCalendarButtonState,
+  shouldAskCalendarConfirm,
+} from "../src/shared/utils/calendar";
 import { TimelineItem } from "../src/shared/utils/timeline";
 
 // ---------------------------------------------------------------------------
@@ -305,5 +309,114 @@ describe("buildIcs", () => {
     expect(getLine(ics!, "DTSTART;VALUE=DATE:")).toBe(
       "DTSTART;VALUE=DATE:20250615"
     );
+  });
+});
+
+describe("getCalendarButtonState", () => {
+  it("returns hidden for completed items", () => {
+    const item = makeItem({ status: "completed", dueDate: "2026-11-15T10:00:00.000Z" });
+    expect(getCalendarButtonState(item)).toBe("hidden");
+  });
+
+  it("returns hidden when dueDate is missing or invalid", () => {
+    expect(getCalendarButtonState(makeItem({ dueDate: null }))).toBe("hidden");
+    expect(getCalendarButtonState(makeItem({ dueDate: "invalid-date" }))).toBe("hidden");
+    expect(getCalendarButtonState(null as any)).toBe("hidden");
+  });
+
+  it("returns add when item has valid dueDate but no calendarAdded metadata", () => {
+    const item = makeItem({ dueDate: "2026-11-15T10:00:00.000Z", metadata: {} });
+    expect(getCalendarButtonState(item)).toBe("add");
+  });
+
+  it("returns added when saved dueDate and hasExplicitTime match current ones", () => {
+    const dueDate = "2026-11-15T10:00:00.000Z";
+    const item = makeItem({
+      dueDate,
+      metadata: {
+        hasExplicitTime: true,
+        calendarAdded: {
+          at: new Date().toISOString(),
+          dueDate,
+          hasExplicitTime: true,
+        },
+      },
+    });
+    expect(getCalendarButtonState(item)).toBe("added");
+  });
+
+  it("returns update when time changes on an item with explicit time", () => {
+    const originalDueDate = "2026-11-15T10:00:00.000Z";
+    const updatedDueDate = "2026-11-15T11:00:00.000Z";
+    const item = makeItem({
+      dueDate: updatedDueDate,
+      metadata: {
+        hasExplicitTime: true,
+        calendarAdded: {
+          at: new Date().toISOString(),
+          dueDate: originalDueDate,
+          hasExplicitTime: true,
+        },
+      },
+    });
+    expect(getCalendarButtonState(item)).toBe("update");
+  });
+
+  it("returns update when hasExplicitTime flag changes", () => {
+    const dueDate = "2026-11-15T10:00:00.000Z";
+    const item = makeItem({
+      dueDate,
+      metadata: {
+        hasExplicitTime: false,
+        calendarAdded: {
+          at: new Date().toISOString(),
+          dueDate,
+          hasExplicitTime: true,
+        },
+      },
+    });
+    expect(getCalendarButtonState(item)).toBe("update");
+  });
+
+  it("returns update when a date-only value changes", () => {
+    const originalDueDate = "2026-11-15T00:00:00.000Z";
+    const updatedDueDate = "2026-11-16T00:00:00.000Z";
+    const item = makeItem({
+      dueDate: updatedDueDate,
+      metadata: {
+        hasExplicitTime: false,
+        calendarAdded: {
+          at: new Date().toISOString(),
+          dueDate: originalDueDate,
+          hasExplicitTime: false,
+        },
+      },
+    });
+    expect(getCalendarButtonState(item)).toBe("update");
+  });
+});
+
+describe("shouldAskCalendarConfirm", () => {
+  it("confirm helper case 1: returns true for add + pending", () => {
+    expect(shouldAskCalendarConfirm("add", true)).toBe(true);
+  });
+
+  it("confirm helper case 2: returns true for update + pending", () => {
+    expect(shouldAskCalendarConfirm("update", true)).toBe(true);
+  });
+
+  it("confirm helper case 3: returns false for added + pending", () => {
+    expect(shouldAskCalendarConfirm("added", true)).toBe(false);
+  });
+
+  it("confirm helper case 4: returns false for hidden + pending", () => {
+    expect(shouldAskCalendarConfirm("hidden", true)).toBe(false);
+  });
+
+  it("confirm helper case 5: returns false when not pending", () => {
+    expect(shouldAskCalendarConfirm("add", false)).toBe(false);
+    expect(shouldAskCalendarConfirm("update", false)).toBe(false);
+    expect(shouldAskCalendarConfirm("added", false)).toBe(false);
+    expect(shouldAskCalendarConfirm("hidden", false)).toBe(false);
   });
 });

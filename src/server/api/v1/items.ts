@@ -6,6 +6,7 @@ import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
 import { reminderService } from "../../services/ReminderService";
 import { eventBus } from "../../services/EventBus";
 import { groupItemsIntoTimeline, TimelineItem } from "../../../shared/utils/timeline";
+import { buildIcs } from "../../../shared/utils/calendar";
 import { isValidUuid, applyUuidParamValidation } from "../../middlewares/validation";
 import { isValidTimezone } from "../../../shared/utils/timezone";
 
@@ -89,6 +90,179 @@ itemsRouter.get("/timeline", requireAuth, async (req: AuthenticatedRequest, res,
 
     const timeline = groupItemsIntoTimeline(timelineItems, new Date());
     res.json({ timeline, total: userItems.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
+function titleToSlug(title: string): string {
+  return (
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 60) || "event"
+  );
+}
+
+// Export item to iCalendar (.ics) format
+itemsRouter.get("/:id/calendar.ics", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!isValidUUID(id)) {
+      return res.status(400).json({ error: "Invalid format for identifier" });
+    }
+
+    // Ownership check: must belong to the user
+    const [item] = await db
+      .select()
+      .from(items)
+      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
+      .limit(1);
+
+    if (!item) {
+      return res.status(404).json({ error: "Item not found" });
+    }
+
+    if (!item.dueDate) {
+      return res.status(404).json({ error: "Item has no due date" });
+    }
+
+    // Get the user's timezone the same way the reminder code does
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, req.userId!))
+      .limit(1);
+
+    const userTimezone = (user?.settings as any)?.timezone || "UTC";
+
+    const timelineItem: TimelineItem = {
+      id: item.id,
+      title: item.title,
+      itemType: item.itemType,
+      status: item.status,
+      dueDate: item.dueDate.toISOString(),
+      snoozedUntil: item.snoozedUntil ? item.snoozedUntil.toISOString() : null,
+      completedAt: item.completedAt ? item.completedAt.toISOString() : null,
+      confidenceScore: item.confidenceScore as number | null,
+      metadata: item.metadata as Record<string, any> | null,
+      createdAt: item.createdAt.toISOString(),
+    };
+
+    const icsContent = buildIcs(timelineItem, userTimezone);
+    if (!icsContent) {
+      return res.status(404).json({ error: "Unable to generate calendar for item" });
+    }
+
+    const filename = `${titleToSlug(item.title)}.ics`;
+    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    res.setHeader("Cache-Control", "no-store");
+
+    return res.status(200).send(icsContent);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/v1/items/:id/calendar-added
+itemsRouter.post("/:id/calendar-added", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!isValidUUID(id)) {
+      return res.status(400).json({ error: "Invalid format for identifier" });
+    }
+
+    const [item] = await db
+      .select()
+      .from(items)
+      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
+      .limit(1);
+
+    if (!item) {
+      return res.status(404).json({ error: "Item not found" });
+    }
+
+    const existingMeta = (item.metadata as Record<string, any>) || {};
+    const hasExplicitTime = Boolean(existingMeta.hasExplicitTime);
+    const dueDateStr = item.dueDate ? item.dueDate.toISOString() : null;
+
+    const calendarAdded = {
+      at: new Date().toISOString(),
+      dueDate: dueDateStr,
+      hasExplicitTime,
+    };
+
+    const updatedMetadata = {
+      ...existingMeta,
+      calendarAdded,
+    };
+
+    const [updated] = await db
+      .update(items)
+      .set({
+        metadata: updatedMetadata,
+        updatedAt: sql`now()`,
+      })
+      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
+      .returning();
+
+    // Cross-device sync via existing item-update path on EventBus
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "item",
+      id: updated.id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
+
+    res.json({ item: updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// DELETE /api/v1/items/:id/calendar-added
+itemsRouter.delete("/:id/calendar-added", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!isValidUUID(id)) {
+      return res.status(400).json({ error: "Invalid format for identifier" });
+    }
+
+    const [item] = await db
+      .select()
+      .from(items)
+      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
+      .limit(1);
+
+    if (!item) {
+      return res.status(404).json({ error: "Item not found" });
+    }
+
+    const existingMeta = (item.metadata as Record<string, any>) || {};
+    const { calendarAdded: _removed, ...restMeta } = existingMeta;
+
+    const [updated] = await db
+      .update(items)
+      .set({
+        metadata: restMeta,
+        updatedAt: sql`now()`,
+      })
+      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
+      .returning();
+
+    // Cross-device sync via existing item-update path on EventBus
+    eventBus.publish(req.userId!, {
+      type: "changed",
+      entity: "item",
+      id: updated.id,
+      at: new Date().toISOString(),
+      origin: req.headers["x-client-id"] as string | undefined,
+    });
+
+    res.json({ item: updated });
   } catch (error) {
     next(error);
   }
