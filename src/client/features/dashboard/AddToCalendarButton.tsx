@@ -4,7 +4,7 @@
  * "Add to Calendar" / "Update calendar" component with confirmation prompt flow.
  *
  * Flow:
- *  - Renders as a normal <a> link with no download and no target="_blank".
+ *  - Renders as a standard <a> link.
  *  - Tapping opens the .ics route and sets a local pending confirmation flag
  *    persisted in sessionStorage under `lifeloop:calendar-pending:<itemId>`.
  *  - While pending, displays: "Did you add it to your calendar?" with "Yes, added" and "No".
@@ -27,16 +27,6 @@ import { TimelineItem } from "../../../shared/utils/timeline";
 interface AddToCalendarButtonProps {
   item: TimelineItem;
   userTimezone?: string;
-}
-
-function titleToSlug(title: string): string {
-  return (
-    title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 60) || "event"
-  );
 }
 
 export const AddToCalendarButton: React.FC<AddToCalendarButtonProps> = React.memo(
@@ -216,7 +206,6 @@ export const AddToCalendarButton: React.FC<AddToCalendarButtonProps> = React.mem
           <a
             id={`add-to-calendar-${item.id}`}
             href={`/api/v1/items/${item.id}/calendar.ics`}
-            download={`${titleToSlug(item.title)}.ics`}
             aria-label={
               state === "update"
                 ? `Update "${item.title}" in calendar`
