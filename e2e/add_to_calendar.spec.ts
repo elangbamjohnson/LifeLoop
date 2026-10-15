@@ -247,6 +247,38 @@ test.describe('add to calendar', () => {
     expect(hasHorizontalOverflow).toBe(false);
   });
 
+  test('card stays expanded after calendar button tap', async ({
+    page,
+    request,
+    baseURL,
+  }) => {
+    await authenticateAndSeedSession(page, request, baseURL!);
+    await page.goto('/');
+    await expect(page.locator('h1:has-text("LifeLoop")')).toBeVisible({ timeout: 15000 });
+
+    await page.locator('#tab-priority').click();
+    await page.waitForTimeout(800);
+
+    const card = page.locator('[id^="item-card-"]', {
+      hasText: 'Geico Car Insurance Renewal',
+    });
+    await expect(card).toBeVisible({ timeout: 10000 });
+    await expandCard(page, card);
+    await page.waitForTimeout(500);
+
+    const calBtn = card.locator('[id^="add-to-calendar-"]').first();
+    await expect(calBtn).toBeVisible({ timeout: 8000 });
+
+    // Intercept any download to prevent navigation away.
+    page.on('download', (dl) => { dl.cancel().catch(() => {}); });
+
+    await calBtn.click();
+    await page.waitForTimeout(400);
+
+    // The button must still be visible — stopPropagation kept the card expanded.
+    await expect(calBtn).toBeVisible({ timeout: 5000 });
+  });
+
   test('tap shows the question', async ({ page, request, baseURL }) => {
     await authenticateAndSeedSession(page, request, baseURL!);
     await page.goto('/');

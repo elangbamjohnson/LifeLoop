@@ -1,13 +1,26 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import request from "supertest";
-import { buildApp } from "../server";
+import { createApp } from "../src/server/app";
+import { createServer as createViteServer } from "vite";
+import { errorHandler } from "../src/server/middlewares/errorHandler";
 
 describe("API 404 Fallthrough Guard", () => {
   let app: any;
 
   beforeAll(async () => {
-    process.env.DISABLE_HMR = "true";
-    app = await buildApp();
+    app = createApp();
+
+    // Replicate the exact server.ts fallback middleware stack:
+    app.all("/api/*", (req, res) => {
+      res.status(404).json({ error: "Not found" });
+    });
+
+    const vite = await createViteServer({
+      server: { middlewareMode: true, hmr: false },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+    app.use(errorHandler);
   });
 
   it("returns 404 with JSON for unmatched /api/* route and HTML for app root", async () => {

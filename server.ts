@@ -18,36 +18,6 @@ import { getAppUrl, validateMailConfig } from "./src/server/services/MailSender"
 // getConnectionString() has already enforced the dev-DB guard inside src/db/index.ts.
 logDbStartup(getConnectionString());
 
-export async function buildApp() {
-  const app = createApp();
-
-  // Stop /api/* falling through to the app
-  app.all("/api/*", (req, res) => {
-    res.status(404).json({ error: "Not found" });
-  });
-
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    // Production static serving
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  }
-
-  // Error Handler (must be last)
-  app.use(errorHandler);
-
-  return app;
-}
-
 async function startServer() {
   // Validate mail provider configuration at boot
   validateMailConfig();
@@ -76,8 +46,32 @@ async function startServer() {
     }
   }
 
-  const app = await buildApp();
+  const app = createApp();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+
+  // Stop /api/* falling through to the app
+  app.all("/api/*", (req, res) => {
+    res.status(404).json({ error: "Not found" });
+  });
+
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    // Production static serving
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
+
+  // Error Handler (must be last)
+  app.use(errorHandler);
 
   // HOST resolution: HOST env var wins (lets the caller inject any interface).
   // Outside production, default to 127.0.0.1 (numeric loopback) — never "localhost",
@@ -100,6 +94,4 @@ async function startServer() {
   });
 }
 
-if (!process.env.VITEST) {
-  startServer();
-}
+startServer();
