@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/server/app";
 import { createServer as createViteServer } from "vite";
+import { apiNotFound } from "../src/server/middlewares/apiNotFound";
 import { errorHandler } from "../src/server/middlewares/errorHandler";
 
 describe("API 404 Fallthrough Guard", () => {
@@ -10,10 +11,8 @@ describe("API 404 Fallthrough Guard", () => {
   beforeAll(async () => {
     app = createApp();
 
-    // Replicate the exact server.ts fallback middleware stack:
-    app.all("/api/*", (req, res) => {
-      res.status(404).json({ error: "Not found" });
-    });
+    // Stop /api/* falling through to the app using the real guard middleware
+    app.all("/api/*", apiNotFound);
 
     const vite = await createViteServer({
       server: { middlewareMode: true, hmr: false },

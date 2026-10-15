@@ -121,6 +121,8 @@ test.describe('add to calendar', () => {
     const calBtn = card.locator('[id^="add-to-calendar-"]').first();
     await expect(calBtn).toBeVisible({ timeout: 8000 });
     await expect(calBtn).toHaveAttribute('href', /.*\/api\/v1\/items\/[a-f0-9-]+\/calendar\.ics$/);
+    await expect(calBtn).not.toHaveAttribute('download');
+    await expect(calBtn).not.toHaveAttribute('target');
   });
 
   test('button hidden for an undated item', async ({ page, request, baseURL }) => {
