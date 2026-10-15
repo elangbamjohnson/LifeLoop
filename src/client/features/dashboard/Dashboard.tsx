@@ -97,6 +97,10 @@ export function Dashboard() {
   const [activeEntity, setActiveEntity] = useState<TimelineItem | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Stable IANA timezone string — used by every ItemCard's AddToCalendarButton
+  const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+
   // Fail-closed fallback: if activeTab is ask or graph for a non-admin, fall back to priority
   useEffect(() => {
     if (!isAdmin && (activeTab === "ask" || activeTab === "graph")) {
@@ -1235,6 +1239,7 @@ export function Dashboard() {
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
                       onConfirmAI={handleConfirmAI}
+                      userTimezone={userTimezone}
                     />
                   ))}
                 </div>
@@ -1267,6 +1272,7 @@ export function Dashboard() {
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
                       onConfirmAI={handleConfirmAI}
+                      userTimezone={userTimezone}
                     />
                   ))}
                 </div>
@@ -1297,6 +1303,7 @@ export function Dashboard() {
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
                       onConfirmAI={handleConfirmAI}
+                      userTimezone={userTimezone}
                     />
                   ))}
                 </div>
@@ -1323,6 +1330,7 @@ export function Dashboard() {
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
                       onConfirmAI={handleConfirmAI}
+                      userTimezone={userTimezone}
                     />
                   ))}
                 </div>
@@ -1359,6 +1367,7 @@ export function Dashboard() {
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
                       onConfirmAI={handleConfirmAI}
+                      userTimezone={userTimezone}
                     />
                   ))}
                 </div>
@@ -1384,6 +1393,7 @@ export function Dashboard() {
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
                       onConfirmAI={handleConfirmAI}
+                      userTimezone={userTimezone}
                     />
                   ))}
                 </div>
@@ -1409,6 +1419,7 @@ export function Dashboard() {
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
                       onConfirmAI={handleConfirmAI}
+                      userTimezone={userTimezone}
                     />
                   ))}
                 </div>
@@ -1434,6 +1445,7 @@ export function Dashboard() {
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
                       onConfirmAI={handleConfirmAI}
+                      userTimezone={userTimezone}
                     />
                   ))}
                 </div>
@@ -1459,6 +1471,7 @@ export function Dashboard() {
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
                       onConfirmAI={handleConfirmAI}
+                      userTimezone={userTimezone}
                     />
                   ))}
                 </div>
@@ -1482,6 +1495,7 @@ export function Dashboard() {
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
                       onConfirmAI={handleConfirmAI}
+                      userTimezone={userTimezone}
                     />
                   ))}
                 </div>
@@ -1505,6 +1519,7 @@ export function Dashboard() {
                       onEdit={setEditingItem}
                       onDelete={handleDeleteItem}
                       onConfirmAI={handleConfirmAI}
+                      userTimezone={userTimezone}
                     />
                   ))}
                 </div>

@@ -507,3 +507,60 @@ button, a {
   }
 }
 
+
+/* ─── Add to Calendar Button ─────────────────────────────────────────────── */
+.add-to-calendar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 48px;
+  min-width: 48px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1.5px solid #BFDBFE;
+  background: #EFF6FF;
+  color: #1D4ED8;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease,
+              box-shadow 150ms ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.add-to-calendar-btn:hover,
+.add-to-calendar-btn:focus-visible {
+  background: #DBEAFE;
+  border-color: #93C5FD;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  outline: none;
+}
+
+.add-to-calendar-btn:active {
+  background: #BFDBFE;
+  transform: scale(0.97);
+}
+
+.dark .add-to-calendar-btn {
+  border-color: #1E40AF;
+  background: rgba(30, 64, 175, 0.18);
+  color: #93C5FD;
+}
+
+.dark .add-to-calendar-btn:hover,
+.dark .add-to-calendar-btn:focus-visible {
+  background: rgba(29, 78, 216, 0.28);
+  border-color: #2563EB;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.20);
+  outline: none;
+}
+
+.dark .add-to-calendar-btn:active {
+  background: rgba(29, 78, 216, 0.40);
+  transform: scale(0.97);
+}
