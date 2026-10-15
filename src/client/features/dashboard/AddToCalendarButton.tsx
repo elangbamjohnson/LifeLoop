@@ -29,6 +29,16 @@ interface AddToCalendarButtonProps {
   userTimezone?: string;
 }
 
+function titleToSlug(title: string): string {
+  return (
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 60) || "event"
+  );
+}
+
 export const AddToCalendarButton: React.FC<AddToCalendarButtonProps> = React.memo(
   ({ item }) => {
     const currentDueSignature = `${item.dueDate || ""}|${Boolean(item.metadata?.hasExplicitTime)}`;
@@ -174,13 +184,13 @@ export const AddToCalendarButton: React.FC<AddToCalendarButtonProps> = React.mem
     const isConfirming = shouldAskCalendarConfirm(state, pending);
 
     return (
-      <div className="flex flex-col gap-2 max-w-full">
+      <div className="flex flex-col items-start gap-2 max-w-full">
         {state === "added" ? (
           <div className="flex items-center gap-2 flex-wrap">
             <span
               id={`add-to-calendar-${item.id}`}
               aria-disabled="true"
-              className="add-to-calendar-btn opacity-80 cursor-default inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300"
+              className="add-to-calendar-btn self-start opacity-80 cursor-default inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300"
               style={{
                 minHeight: "48px",
                 minWidth: "48px",
@@ -206,13 +216,14 @@ export const AddToCalendarButton: React.FC<AddToCalendarButtonProps> = React.mem
           <a
             id={`add-to-calendar-${item.id}`}
             href={`/api/v1/items/${item.id}/calendar.ics`}
+            download={`${titleToSlug(item.title)}.ics`}
             aria-label={
               state === "update"
                 ? `Update "${item.title}" in calendar`
                 : `Add "${item.title}" to calendar`
             }
             onClick={handleLinkClick}
-            className="add-to-calendar-btn"
+            className="add-to-calendar-btn self-start"
             style={{
               minHeight: "48px",
               minWidth: "48px",
