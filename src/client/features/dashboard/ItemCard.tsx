@@ -21,6 +21,7 @@ import {
 import { TimelineItem } from "../../../shared/utils/timeline";
 import { ItemCardActions } from "./ItemCardActions";
 import { getTabClientId } from "../../utils/tabId";
+import { AddToCalendarButton } from "./AddToCalendarButton";
 
 interface ItemCardProps {
   key?: React.Key;
@@ -30,6 +31,8 @@ interface ItemCardProps {
   onEdit: (item: TimelineItem) => void;
   onDelete: (id: string) => void;
   onConfirmAI?: (id: string) => void;
+  /** IANA timezone string (e.g. "America/New_York"). Used by AddToCalendarButton. */
+  userTimezone?: string;
 }
 
 export const ItemCard: React.FC<ItemCardProps> = React.memo(({
@@ -39,6 +42,7 @@ export const ItemCard: React.FC<ItemCardProps> = React.memo(({
   onEdit,
   onDelete,
   onConfirmAI,
+  userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const isCompleted = item.status === "completed";
@@ -207,14 +211,17 @@ export const ItemCard: React.FC<ItemCardProps> = React.memo(({
           
           {/* Expanded Actions & Details */}
           {isExpanded && !isCompleted && (
-            <ItemCardActions
-              item={item}
-              variant="waiting_for_expanded"
-              onToggleComplete={onToggleComplete}
-              onSnooze={onSnooze}
-              onEdit={onEdit}
-              onDelete={onDelete}
-            />
+            <div className="space-y-2">
+              <ItemCardActions
+                item={item}
+                variant="waiting_for_expanded"
+                onToggleComplete={onToggleComplete}
+                onSnooze={onSnooze}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              />
+              <AddToCalendarButton item={item} userTimezone={userTimezone} />
+            </div>
           )}
         </div>
       </div>
@@ -407,6 +414,9 @@ export const ItemCard: React.FC<ItemCardProps> = React.memo(({
               )}
             </div>
           )}
+
+          {/* Add to Calendar */}
+          <AddToCalendarButton item={item} userTimezone={userTimezone} />
 
           {/* Footer Row: Tags, Family Sharing & Attachment */}
           <div className="pt-2 border-t border-[#F5F5F4] dark:border-[#383330] flex items-center justify-between gap-2 text-xs flex-wrap">
