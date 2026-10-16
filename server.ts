@@ -7,6 +7,7 @@ import pinoHttp from "pino-http";
 
 import { createApp } from "./src/server/app";
 import { errorHandler } from "./src/server/middlewares/errorHandler";
+import { apiNotFound } from "./src/server/middlewares/apiNotFound";
 import { db } from "./src/db";
 import { users } from "./src/db/schema";
 import { getConnectionString, logDbStartup } from "./src/db/config";
@@ -49,6 +50,7 @@ async function startServer() {
   const app = createApp();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
+  app.all("/api/*", apiNotFound);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

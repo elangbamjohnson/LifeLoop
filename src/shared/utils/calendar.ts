@@ -191,3 +191,50 @@ export function buildIcs(
   // 7. Fold each line at 75 bytes and join with CRLF
   return lines.map(foldLine).join("\r\n") + "\r\n";
 }
+
+export type CalendarButtonState = "hidden" | "add" | "added" | "update";
+
+/**
+ * Determine the display state of the "Add to Calendar" button for a given item:
+ * - "hidden": item has no valid due date or is already completed.
+ * - "add": item has never been added to calendar (metadata.calendarAdded is missing).
+ * - "added": item was added, and current dueDate & hasExplicitTime equal the saved values.
+ * - "update": item was previously added, but dueDate or hasExplicitTime has changed since.
+ */
+export function getCalendarButtonState(item: TimelineItem | any): CalendarButtonState {
+  if (!item) return "hidden";
+  if (item.status === "completed") return "hidden";
+  if (!item.dueDate) return "hidden";
+
+  const parsedDueDate = new Date(item.dueDate);
+  if (isNaN(parsedDueDate.getTime())) return "hidden";
+
+  const calendarAdded = item.metadata?.calendarAdded;
+  if (!calendarAdded) return "add";
+
+  const savedDueDate = calendarAdded.dueDate;
+  const savedHasExplicitTime = Boolean(calendarAdded.hasExplicitTime);
+
+  const currentHasExplicitTime = Boolean(item.metadata?.hasExplicitTime);
+
+  // Compare saved vs current dueDate
+  const savedTime = savedDueDate ? new Date(savedDueDate).getTime() : NaN;
+  const currentTime = parsedDueDate.getTime();
+
+  if (savedTime === currentTime && savedHasExplicitTime === currentHasExplicitTime) {
+    return "added";
+  }
+
+  return "update";
+}
+
+/**
+ * Returns true only when pending is true and the state is "add" or "update".
+ */
+export function shouldAskCalendarConfirm(
+  state: CalendarButtonState,
+  pending: boolean
+): boolean {
+  return pending === true && (state === "add" || state === "update");
+}
+
