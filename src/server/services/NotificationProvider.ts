@@ -89,10 +89,31 @@ export class WebNotificationProvider implements ChannelProvider {
       }
 
       // Fetch user subscriptions
-      const subscriptions = await db
-        .select()
-        .from(pushSubscriptions)
-        .where(eq(pushSubscriptions.userId, payload.userId));
+      let subscriptions: (typeof pushSubscriptions.$inferSelect)[] = [];
+      try {
+        subscriptions = await db
+          .select()
+          .from(pushSubscriptions)
+          .where(eq(pushSubscriptions.userId, payload.userId));
+      } catch (loadError: any) {
+        console.warn(
+          `[WebNotificationProvider] Failed to load push subscriptions: ${sanitizeErrorMessage(loadError?.message || "Database error")}`
+        );
+        return {
+          success: true,
+          channel: this.channel,
+          status: "delivered",
+          idempotencyKey,
+          deliveredAt: new Date(),
+          payload: {
+            title: payload.title,
+            body: payload.body,
+            tag: `lifeloop-${payload.reminderId}`,
+            timestamp: Date.now(),
+            pushed: 0,
+          },
+        };
+      }
 
       // If user has no subscriptions, keep today's behavior ("delivered") and record pushed: 0
       if (subscriptions.length === 0) {

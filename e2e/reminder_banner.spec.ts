@@ -71,12 +71,7 @@ test.describe('reminder banner', () => {
     await expect(banner).toBeHidden();
 
     // Close the item modal
-    const closeBtn = page.locator('#item-edit-close-btn');
-    if (await closeBtn.isVisible()) {
-      await closeBtn.click();
-    } else {
-      await page.keyboard.press('Escape');
-    }
+    await page.locator('#item-edit-modal-card button').first().click();
     await expect(page.locator('#item-edit-modal-card')).toBeHidden({ timeout: 5000 });
 
     // 5. Test auto-dismiss: trigger another banner and wait for auto-dismiss (~8 seconds)

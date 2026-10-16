@@ -335,7 +335,108 @@ describe("Web Push Notifications (tests/web_push.test.ts)", () => {
     expect(result.error).toBeDefined();
   });
 
-  // Public key route
+  // 8. Missing table must not break reminders
+  it("missing table must not break reminders: loading subscriptions throws -> logs warning and returns delivered with pushed: 0", async () => {
+    process.env.VAPID_PUBLIC_KEY = "test-mock-public-key";
+    process.env.VAPID_PRIVATE_KEY = "test-mock-private-key";
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const origSelect = db.select.bind(db);
+    const selectSpy = vi.spyOn(db, "select").mockImplementation((...args: any[]) => {
+      const query = origSelect(...args);
+      const origFrom = query.from.bind(query);
+      query.from = (table: any) => {
+        if (table === pushSubscriptions) {
+          throw new Error('relation "push_subscriptions" does not exist (simulated missing table)');
+        }
+        return origFrom(table);
+      };
+      return query;
+    });
+
+    const result = await webProvider.send(
+      {
+        reminderId: uuidv4(),
+        userId: testUserId,
+        title: "Missing Table Reminder",
+        body: "Should still be delivered",
+        channel: "web",
+        scheduledAt: new Date(),
+      },
+      "idem-missing-table"
+    );
+
+    expect(result.status).toBe("delivered");
+    expect(result.success).toBe(true);
+    expect(result.payload.pushed).toBe(0);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[WebNotificationProvider] Failed to load push subscriptions")
+    );
+    // Ensure no secrets are leaked in warning
+    const warnedMsg = warnSpy.mock.calls.map((c) => c.join(" ")).join(" ");
+    expect(warnedMsg).not.toContain("test-mock-private-key");
+
+    warnSpy.mockRestore();
+    selectSpy.mockRestore();
+  });
+
+  // 9. Reminder goes through dispatchDueReminders to status sent when subscription table is missing
+  it("dispatchDueReminders updates reminder to status sent when subscription table is missing", async () => {
+    process.env.VAPID_PUBLIC_KEY = "test-mock-public-key";
+    process.env.VAPID_PRIVATE_KEY = "test-mock-private-key";
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const origSelect = db.select.bind(db);
+    const selectSpy = vi.spyOn(db, "select").mockImplementation((...args: any[]) => {
+      const query = origSelect(...args);
+      const origFrom = query.from.bind(query);
+      query.from = (table: any) => {
+        if (table === pushSubscriptions) {
+          throw new Error('relation "push_subscriptions" does not exist (simulated missing table)');
+        }
+        return origFrom(table);
+      };
+      return query;
+    });
+
+    const [item] = await db
+      .insert(items)
+      .values({
+        userId: testUserId,
+        title: "Item for Missing Table Test",
+        itemType: "task",
+        status: "active",
+      })
+      .returning();
+
+    const [reminder] = await db
+      .insert(reminders)
+      .values({
+        userId: testUserId,
+        itemId: item.id,
+        title: "Reminder for Missing Table Test",
+        scheduledAt: new Date(Date.now() - 5000), // Due now
+        channel: "web",
+        status: "scheduled",
+        metadata: { deliveryAttempts: 0 },
+      })
+      .returning();
+
+    await reminderService.dispatchDueReminders(new Date());
+
+    const [updatedReminder] = await db
+      .select()
+      .from(reminders)
+      .where(eq(reminders.id, reminder.id));
+
+    expect(updatedReminder.status).toBe("sent");
+    expect(updatedReminder.sentAt).toBeDefined();
+
+    warnSpy.mockRestore();
+    selectSpy.mockRestore();
+  });
+
+  // 10. Public key route returns configured key
   it("public key route returns the configured public key", async () => {
     process.env.VAPID_PUBLIC_KEY = "test-vapid-public-key-value";
     const res = await request(app)
