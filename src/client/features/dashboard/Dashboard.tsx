@@ -260,6 +260,21 @@ export function Dashboard() {
   const { captures, setCaptures, items, setItems, loading, refetch: fetchData } =
     useDashboardPolling(hasProcessing, logout);
 
+  // Open item from URL search param if present (?item=<id>)
+  const openedUrlItemRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || items.length === 0) return;
+    const urlItemId = new URLSearchParams(window.location.search).get("item");
+    if (!urlItemId) return;
+    if (openedUrlItemRef.current === urlItemId) return;
+    const target = items.find((i) => i.id === urlItemId);
+    if (target) {
+      openedUrlItemRef.current = urlItemId;
+      setEditingItem(target);
+    }
+  }, [items]);
+
   const tabId = useRef(getTabClientId()).current;
   const lastFetchTimeRef = useRef(0);
   const trailingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
