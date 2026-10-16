@@ -436,8 +436,12 @@ describe("AI Resilience: Immediate Fallback & Background Retry (Option C)", () =
     const remindersInitial = await db.select().from(reminders).where(eq(reminders.itemId, fallbackItem.id));
     expect(remindersInitial.length).toBe(0);
 
-    // 2. High-confidence AI result WITH hasExplicitTime: true and exact clock time
-    const exactLocalWallClock = "2026-10-15T15:30:00";
+    // 2. High-confidence AI result WITH hasExplicitTime: true and exact clock time (dynamically computed in future)
+    const futureDate = new Date(Date.now() + 30 * 86400000);
+    const yyyy = futureDate.getUTCFullYear();
+    const mm = String(futureDate.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(futureDate.getUTCDate()).padStart(2, "0");
+    const exactLocalWallClock = `${yyyy}-${mm}-${dd}T15:30:00`;
     const enrichedAIItems = [
       {
         title: "Team standup meeting",
