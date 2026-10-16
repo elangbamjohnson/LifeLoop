@@ -72,6 +72,17 @@ export function ItemEditModal({ item, isOpen, onClose, onSave, userTimezone }: I
     setWaitingFor(item.metadata?.waitingFor || "");
   }, [item, userTimezone]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   const toggleOffset = (offset: number) => {
     setSelectedOffsets((prev) =>
       prev.includes(offset) ? prev.filter((o) => o !== offset) : [...prev, offset]
@@ -128,6 +139,8 @@ export function ItemEditModal({ item, isOpen, onClose, onSave, userTimezone }: I
             Edit Life Item
           </h3>
           <button
+            id="item-edit-close-btn"
+            aria-label="Close edit item"
             onClick={onClose}
             className="p-1.5 text-[#78716C] hover:text-[#1C1917] dark:hover:text-white rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
           >

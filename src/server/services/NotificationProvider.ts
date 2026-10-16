@@ -1,7 +1,15 @@
 import { db } from "../../db";
-import { notificationLogs, reminders } from "../../db/schema";
+import { notificationLogs, reminders, pushSubscriptions } from "../../db/schema";
 import { eq } from "drizzle-orm";
+import webPush from "web-push";
 import { getMailSender, getAppUrl, MockMailSender } from "./MailSender";
+
+function sanitizeErrorMessage(msg: string): string {
+  if (!msg) return "Push delivery failed";
+  return msg
+    .replace(/(?:key|secret|token|bearer|auth|vapid)[=:\s]+[A-Za-z0-9_\-\.\/+=]+/gi, "[REDACTED]")
+    .replace(/["']?[a-zA-Z0-9_\-]{30,}["']?/g, "[REDACTED]");
+}
 
 export type NotificationChannel = "web" | "ios" | "android" | "email";
 
@@ -36,40 +44,180 @@ export class WebNotificationProvider implements ChannelProvider {
   channel: NotificationChannel = "web";
 
   async send(payload: NotificationPayload, idempotencyKey: string): Promise<NotificationResult> {
-    const isOffline = payload.metadata?.isDeviceOffline === true;
-    
-    // If device is offline, mark as queued for delivery when back online
-    if (isOffline) {
+    try {
+      const isOffline = payload.metadata?.isDeviceOffline === true;
+
+      // If device is offline, mark as queued for delivery when back online
+      if (isOffline) {
+        return {
+          success: true,
+          channel: this.channel,
+          status: "queued",
+          idempotencyKey,
+          payload: {
+            badge: "/favicon.ico",
+            icon: "/favicon.ico",
+            title: payload.title,
+            body: payload.body,
+            tag: `lifeloop-${payload.reminderId}`,
+            data: { itemId: payload.itemId, url: payload.itemId ? `/?item=${encodeURIComponent(payload.itemId)}` : "/" },
+            pushed: 0,
+          },
+        };
+      }
+
+      const publicKey = process.env.VAPID_PUBLIC_KEY;
+      const privateKey = process.env.VAPID_PRIVATE_KEY;
+      const subject = process.env.VAPID_SUBJECT || "mailto:admin@lifeloop.app";
+
+      // If keys are missing, keep today's behavior ("delivered") and record pushed: 0
+      if (!publicKey || !privateKey) {
+        return {
+          success: true,
+          channel: this.channel,
+          status: "delivered",
+          idempotencyKey,
+          deliveredAt: new Date(),
+          payload: {
+            title: payload.title,
+            body: payload.body,
+            tag: `lifeloop-${payload.reminderId}`,
+            timestamp: Date.now(),
+            pushed: 0,
+          },
+        };
+      }
+
+      // Fetch user subscriptions
+      const subscriptions = await db
+        .select()
+        .from(pushSubscriptions)
+        .where(eq(pushSubscriptions.userId, payload.userId));
+
+      // If user has no subscriptions, keep today's behavior ("delivered") and record pushed: 0
+      if (subscriptions.length === 0) {
+        return {
+          success: true,
+          channel: this.channel,
+          status: "delivered",
+          idempotencyKey,
+          deliveredAt: new Date(),
+          payload: {
+            title: payload.title,
+            body: payload.body,
+            tag: `lifeloop-${payload.reminderId}`,
+            timestamp: Date.now(),
+            pushed: 0,
+          },
+        };
+      }
+
+      // Configure web-push details
+      webPush.setVapidDetails(subject, publicKey, privateKey);
+
+      // Small payload: title, body, item id, and a URL that opens the item
+      const itemUrl = payload.itemId ? `/?item=${encodeURIComponent(payload.itemId)}` : "/";
+      const pushData = JSON.stringify({
+        title: payload.title,
+        body: payload.body,
+        itemId: payload.itemId,
+        url: itemUrl,
+      });
+
+      let successCount = 0;
+      let nonExpiredFailureCount = 0;
+      let lastErrorMessage = "";
+
+      for (const sub of subscriptions) {
+        try {
+          await webPush.sendNotification(
+            {
+              endpoint: sub.endpoint,
+              keys: {
+                p256dh: sub.p256dh,
+                auth: sub.auth,
+              },
+            },
+            pushData
+          );
+          successCount++;
+        } catch (err: any) {
+          const status = err?.statusCode || err?.status;
+          // a 404 or 410 from the push service deletes that subscription and does not count as a failure
+          if (status === 404 || status === 410) {
+            await db
+              .delete(pushSubscriptions)
+              .where(eq(pushSubscriptions.endpoint, sub.endpoint))
+              .catch(() => {});
+          } else {
+            nonExpiredFailureCount++;
+            lastErrorMessage = sanitizeErrorMessage(err?.message || "Push delivery failed");
+          }
+        }
+      }
+
+      // At least one send worked: "delivered", with the count in the payload
+      if (successCount > 0) {
+        return {
+          success: true,
+          channel: this.channel,
+          status: "delivered",
+          idempotencyKey,
+          deliveredAt: new Date(),
+          payload: {
+            title: payload.title,
+            body: payload.body,
+            tag: `lifeloop-${payload.reminderId}`,
+            timestamp: Date.now(),
+            pushed: successCount,
+          },
+        };
+      }
+
+      // Every send failed for another reason: "failed", with an error text that has no secrets
+      if (nonExpiredFailureCount > 0) {
+        return {
+          success: false,
+          channel: this.channel,
+          status: "failed",
+          idempotencyKey,
+          error: lastErrorMessage || "All push notification dispatches failed",
+          payload: {
+            pushed: 0,
+            failed: nonExpiredFailureCount,
+          },
+        };
+      }
+
+      // If all subscriptions were 404/410, deleted subscriptions don't count as failure
       return {
         success: true,
         channel: this.channel,
-        status: "queued",
+        status: "delivered",
         idempotencyKey,
+        deliveredAt: new Date(),
         payload: {
-          badge: "/favicon.ico",
-          icon: "/favicon.ico",
           title: payload.title,
           body: payload.body,
           tag: `lifeloop-${payload.reminderId}`,
-          data: { itemId: payload.itemId, url: "/" }
-        }
+          timestamp: Date.now(),
+          pushed: 0,
+        },
+      };
+    } catch (unexpectedError: any) {
+      // The provider must never throw. Return failed with sanitized error text
+      return {
+        success: false,
+        channel: this.channel,
+        status: "failed",
+        idempotencyKey,
+        error: "Unexpected error during web push delivery",
+        payload: {
+          pushed: 0,
+          error: sanitizeErrorMessage(unexpectedError?.message || "Unknown error"),
+        },
       };
     }
-
-    // Live Web Notification dispatch
-    return {
-      success: true,
-      channel: this.channel,
-      status: "delivered",
-      idempotencyKey,
-      deliveredAt: new Date(),
-      payload: {
-        title: payload.title,
-        body: payload.body,
-        tag: `lifeloop-${payload.reminderId}`,
-        timestamp: Date.now(),
-      }
-    };
   }
 }
 

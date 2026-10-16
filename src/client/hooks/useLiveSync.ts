@@ -5,6 +5,7 @@ export interface UseLiveSyncOptions {
   enabled?: boolean;
   onSync?: () => void;
   onAuthError?: () => void;
+  onEvent?: (event: any) => void;
   tabId?: string;
 }
 
@@ -18,6 +19,7 @@ export function useLiveSync({
   enabled = true,
   onSync,
   onAuthError,
+  onEvent,
   tabId: propTabId,
 }: UseLiveSyncOptions = {}): UseLiveSyncReturn {
   const [isConnected, setIsConnected] = useState(false);
@@ -30,6 +32,9 @@ export function useLiveSync({
 
   const onAuthErrorRef = useRef(onAuthError);
   onAuthErrorRef.current = onAuthError;
+
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
 
   const isMountedRef = useRef(false);
   const stoppedRef = useRef(false);
@@ -149,11 +154,15 @@ export function useLiveSync({
     es.onmessage = (event: MessageEvent) => {
       if (!isMountedRef.current || stoppedRef.current) return;
 
+      let payload: any = null;
       try {
-        const payload = JSON.parse(event.data);
+        payload = JSON.parse(event.data);
         if (payload && payload.origin && tabId && payload.origin === tabId) {
           // Ignore own-tab mutation
           return;
+        }
+        if (payload) {
+          onEventRef.current?.(payload);
         }
       } catch (_) {
         // Ping or non-JSON comments are ignored

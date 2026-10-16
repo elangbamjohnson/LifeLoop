@@ -11,6 +11,7 @@ import { askRouter } from "./api/v1/ask";
 import { relationsRouter } from "./api/v1/relations";
 import { familiesRouter } from "./api/v1/families";
 import { eventsRouter } from "./api/v1/events";
+import { pushRouter } from "./api/v1/push";
 import { healthRouter } from "./api/health";
 import { errorHandler } from "./middlewares/errorHandler";
 
@@ -57,6 +58,7 @@ export function createApp(options: CreateAppOptions = {}): express.Application {
   app.use("/api/v1/relations", relationsRouter);
   app.use("/api/v1/families", familiesRouter);
   app.use("/api/v1/events", eventsRouter);
+  app.use("/api/v1/push", pushRouter);
 
   // Custom route overrides for tests
   const standardPaths = [
@@ -68,13 +70,14 @@ export function createApp(options: CreateAppOptions = {}): express.Application {
     "/api/v1/relations",
     "/api/v1/families",
     "/api/v1/events",
+    "/api/v1/push",
   ];
   if (options.customPath && options.customRouter && !standardPaths.includes(options.customPath)) {
     app.use(options.customPath, options.customRouter);
   }
 
   // E2E Test utilities
-  if (process.env.EMAIL_PROVIDER === 'mock') {
+  if (process.env.EMAIL_PROVIDER === 'mock' || process.env.NODE_ENV === 'test') {
     app.get("/api/v1/test/mock-emails", async (req, res) => {
       const { getEmailProvider } = await import("./services/EmailProvider");
       const provider: any = getEmailProvider();
@@ -84,6 +87,12 @@ export function createApp(options: CreateAppOptions = {}): express.Application {
       const { getEmailProvider } = await import("./services/EmailProvider");
       const provider: any = getEmailProvider();
       provider.emails = [];
+      res.json({ success: true });
+    });
+    app.post("/api/v1/test/publish-event", async (req, res) => {
+      const { userId, event } = req.body;
+      const { eventBus } = await import("./services/EventBus");
+      eventBus.publish(userId, event);
       res.json({ success: true });
     });
   }

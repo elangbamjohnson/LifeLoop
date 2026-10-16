@@ -8,6 +8,66 @@ interface PreferencesModalProps {
   onClose: () => void;
 }
 
+export type PushState =
+  | "not supported"
+  | "on iOS but not installed to the Home Screen"
+  | "blocked"
+  | "on"
+  | "off";
+
+export function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+export function computePushState(
+  channels: string[],
+  permissionStatus: string
+): PushState {
+  if (typeof window === "undefined") return "not supported";
+
+  const isIOS =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+  const isStandalone =
+    (window.navigator as any).standalone === true ||
+    (typeof window.matchMedia === "function" &&
+      window.matchMedia("(display-mode: standalone)").matches);
+
+  if (isIOS && !isStandalone) {
+    return "on iOS but not installed to the Home Screen";
+  }
+
+  const hasPushSupport =
+    "Notification" in window &&
+    Boolean(window.Notification) &&
+    "serviceWorker" in navigator &&
+    Boolean(navigator.serviceWorker) &&
+    "PushManager" in window &&
+    Boolean((window as any).PushManager);
+
+  if (!hasPushSupport) {
+    return "not supported";
+  }
+
+  if (permissionStatus === "denied") {
+    return "blocked";
+  }
+
+  if (channels.includes("web") && permissionStatus === "granted") {
+    return "on";
+  }
+
+  return "off";
+}
+
 export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
   const [autoReminders, setAutoReminders] = useState(false);
   const [emailReminders, setEmailReminders] = useState(false);
@@ -17,7 +77,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
   const [quietHoursStart, setQuietHoursStart] = useState("22:00");
   const [quietHoursEnd, setQuietHoursEnd] = useState("08:00");
   const [permissionStatus, setPermissionStatus] = useState<string>(
-    typeof Notification !== "undefined" ? Notification.permission : "unsupported"
+    typeof Notification !== "undefined" && Notification.permission ? Notification.permission : "default"
   );
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -68,20 +128,108 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
   if (!isOpen) return null;
 
   const requestWebPermission = async () => {
-    if (typeof Notification !== "undefined") {
+    if (typeof Notification === "undefined") return;
+
+    try {
       const perm = await Notification.requestPermission();
       setPermissionStatus(perm);
-      if (perm === "granted" && !channels.includes("web")) {
-        setChannels([...channels, "web"]);
+
+      if (perm === "granted") {
+        try {
+          const keyRes = await fetch("/api/v1/push/public-key");
+          if (keyRes.ok) {
+            const { publicKey } = await keyRes.json();
+            if (publicKey && "serviceWorker" in navigator) {
+              const reg =
+                (await navigator.serviceWorker.ready.catch(() => null)) ||
+                (await navigator.serviceWorker.getRegistration());
+              if (reg && reg.pushManager) {
+                const sub = await reg.pushManager.subscribe({
+                  userVisibleOnly: true,
+                  applicationServerKey: urlBase64ToUint8Array(publicKey),
+                });
+                const subJson = sub.toJSON();
+                await fetch("/api/v1/push/subscribe", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    endpoint: sub.endpoint,
+                    keys: subJson.keys,
+                    userAgent: navigator.userAgent,
+                  }),
+                });
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Could not register push subscription on server:", e);
+        }
+
+        if (!channels.includes("web")) {
+          setChannels((prev) => [...prev, "web"]);
+        }
       }
+    } catch (err) {
+      console.error("Error requesting notification permission:", err);
     }
   };
 
-  const toggleChannel = (ch: string) => {
+  const handleToggleWebPush = async () => {
     if (errorMessage) setErrorMessage(null);
-    setChannels((prev) =>
-      prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]
-    );
+    const currentState = computePushState(channels, permissionStatus);
+
+    if (currentState === "on") {
+      try {
+        let endpoint: string | undefined;
+        if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+          const reg = await navigator.serviceWorker.getRegistration();
+          const sub = await reg?.pushManager?.getSubscription();
+          if (sub) {
+            endpoint = sub.endpoint;
+            await sub.unsubscribe().catch(() => {});
+          }
+        }
+
+        await fetch("/api/v1/push/subscribe", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: endpoint ? JSON.stringify({ endpoint }) : undefined,
+        }).catch(() => {});
+      } catch (err) {
+        console.warn("Failed to delete push subscription:", err);
+      }
+
+      setChannels((prev) => prev.filter((c) => c !== "web"));
+      return;
+    }
+
+    if (currentState === "blocked") {
+      setErrorMessage("Notifications are blocked in your browser settings. Please enable them to receive push reminders.");
+      return;
+    }
+
+    if (currentState === "on iOS but not installed to the Home Screen") {
+      setErrorMessage("On iOS, push notifications require adding LifeLoop to your Home Screen.");
+      return;
+    }
+
+    if (currentState === "not supported") {
+      setErrorMessage("Web push notifications are not supported in this browser.");
+      return;
+    }
+
+    await requestWebPermission();
+  };
+
+  const toggleChannel = async (ch: string) => {
+    if (ch === "web") {
+      await handleToggleWebPush();
+    } else {
+      if (errorMessage) setErrorMessage(null);
+      setChannels((prev) =>
+        prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]
+      );
+    }
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -294,42 +442,108 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
               Delivery Channels
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {[
-                { id: "web", name: "In-App / Push", desc: "Native browser notification banners" },
-                { id: "email", name: "Email Digest", desc: "Actionable morning summary" },
-              ].map((ch) => (
-                <div
-                  key={ch.id}
-                  onClick={() => toggleChannel(ch.id)}
-                  className={`touch-target-48 min-h-[48px] p-3.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
-                    channels.includes(ch.id)
-                      ? "border-[#1C1917] dark:border-[#FDFBF7] bg-white dark:bg-[#292524] shadow-xs"
-                      : "border-[#E7E5E4] dark:border-[#44403C] hover:bg-black/5 dark:hover:bg-white/5"
-                  }`}
-                >
-                  <div className="min-w-0 pr-2">
-                    <div className="text-xs font-medium text-[#1C1917] dark:text-[#FDFBF7] truncate">
-                      {ch.name}
-                    </div>
-                    <div className="text-[11px] text-[#78716C] dark:text-[#A8A29E] truncate">
-                      {ch.desc}
-                    </div>
-                  </div>
+              {/* In-App / Push Row */}
+              {(() => {
+                const pushState = computePushState(channels, permissionStatus);
+                return (
                   <div
-                    className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
-                      channels.includes(ch.id)
-                        ? "bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] border-transparent"
-                        : "border-[#D6D3D1] dark:border-[#57534E]"
+                    id="channel-web-row"
+                    data-testid="channel-web-row"
+                    role="button"
+                    tabIndex={0}
+                    aria-label="In-App / Push Notifications"
+                    onClick={() => toggleChannel("web")}
+                    onKeyDown={(e) => {
+                      if (e.key === " " || e.key === "Enter") {
+                        e.preventDefault();
+                        toggleChannel("web");
+                      }
+                    }}
+                    className={`touch-target-48 min-h-[48px] p-3.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                      pushState === "on"
+                        ? "border-[#1C1917] dark:border-[#FDFBF7] bg-white dark:bg-[#292524] shadow-xs"
+                        : "border-[#E7E5E4] dark:border-[#44403C] hover:bg-black/5 dark:hover:bg-white/5"
                     }`}
                   >
-                    {channels.includes(ch.id) && <Check className="w-3 h-3 stroke-[3]" />}
+                    <div className="min-w-0 pr-2 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs font-medium text-[#1C1917] dark:text-[#FDFBF7]">
+                          In-App / Push
+                        </span>
+                        <span
+                          data-testid="push-status-badge"
+                          className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md break-words ${
+                            pushState === "on"
+                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                              : pushState === "blocked"
+                              ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300"
+                              : pushState === "on iOS but not installed to the Home Screen"
+                              ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                              : "bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-400"
+                          }`}
+                        >
+                          {pushState}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-[#78716C] dark:text-[#A8A29E] truncate">
+                        Native browser notification banners
+                      </div>
+                    </div>
+                    <div
+                      className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                        pushState === "on"
+                          ? "bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] border-transparent"
+                          : "border-[#D6D3D1] dark:border-[#57534E]"
+                      }`}
+                    >
+                      {pushState === "on" && <Check className="w-3 h-3 stroke-[3]" />}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Email Digest Row */}
+              <div
+                id="channel-email-row"
+                data-testid="channel-email-row"
+                role="button"
+                tabIndex={0}
+                aria-label="Email Digest"
+                onClick={() => toggleChannel("email")}
+                onKeyDown={(e) => {
+                  if (e.key === " " || e.key === "Enter") {
+                    e.preventDefault();
+                    toggleChannel("email");
+                  }
+                }}
+                className={`touch-target-48 min-h-[48px] p-3.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                  channels.includes("email")
+                    ? "border-[#1C1917] dark:border-[#FDFBF7] bg-white dark:bg-[#292524] shadow-xs"
+                    : "border-[#E7E5E4] dark:border-[#44403C] hover:bg-black/5 dark:hover:bg-white/5"
+                }`}
+              >
+                <div className="min-w-0 pr-2 flex-1">
+                  <div className="text-xs font-medium text-[#1C1917] dark:text-[#FDFBF7] truncate">
+                    Email Digest
+                  </div>
+                  <div className="text-[11px] text-[#78716C] dark:text-[#A8A29E] truncate">
+                    Actionable morning summary
                   </div>
                 </div>
-              ))}
+                <div
+                  className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                    channels.includes("email")
+                      ? "bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] border-transparent"
+                      : "border-[#D6D3D1] dark:border-[#57534E]"
+                  }`}
+                >
+                  {channels.includes("email") && <Check className="w-3 h-3 stroke-[3]" />}
+                </div>
+              </div>
             </div>
 
             {/* Browser Permission Prompt Helper */}
-            {typeof Notification !== "undefined" && permissionStatus !== "granted" && (
+            {typeof Notification !== "undefined" && permissionStatus !== "granted" && computePushState(channels, permissionStatus) !== "not supported" && computePushState(channels, permissionStatus) !== "on iOS but not installed to the Home Screen" && (
               <div className="mt-2.5">
                 <button
                   type="button"

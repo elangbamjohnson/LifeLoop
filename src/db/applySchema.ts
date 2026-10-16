@@ -181,6 +181,17 @@ export async function applySchema(sql: postgres.Sql, targetSchema: string): Prom
       is_read INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS ${targetSchema}.push_subscriptions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES ${targetSchema}.users(id) ON DELETE CASCADE,
+      endpoint TEXT NOT NULL UNIQUE,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      user_agent TEXT,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS push_sub_user_id_idx ON ${targetSchema}.push_subscriptions(user_id);
   `);
 
   console.log(`[DB:applySchema] Schema '${targetSchema}' ready.`);
