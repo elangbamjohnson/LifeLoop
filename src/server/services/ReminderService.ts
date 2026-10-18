@@ -891,6 +891,14 @@ export class ReminderService {
           id: reminder.id,
           at: now.toISOString(),
         });
+        eventBus.publish(reminder.userId, {
+          type: "reminder_delivered",
+          entity: "reminder",
+          id: reminder.id,
+          title: reminder.title,
+          itemId: reminder.itemId || undefined,
+          at: now.toISOString(),
+        });
       } catch (err: any) {
         console.error(`Failed to dispatch reminder ${reminder.id}:`, err);
         // Release claim on unexpected error so it can be retried on next run

@@ -31,6 +31,7 @@ import { ItemCard } from "./ItemCard";
 import { ItemEditModal } from "./ItemEditModal";
 import { PreferencesModal } from "./PreferencesModal";
 import { InstallModal } from "./InstallModal";
+import { ReminderBanner } from "./ReminderBanner";
 import { AskView } from "./AskView";
 import { LifeGraphView } from "./LifeGraphView";
 import { EntityDetailView } from "./EntityDetailView";
@@ -259,6 +260,21 @@ export function Dashboard() {
   const { captures, setCaptures, items, setItems, loading, refetch: fetchData } =
     useDashboardPolling(hasProcessing, logout);
 
+  // Open item from URL search param if present (?item=<id>)
+  const openedUrlItemRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || items.length === 0) return;
+    const urlItemId = new URLSearchParams(window.location.search).get("item");
+    if (!urlItemId) return;
+    if (openedUrlItemRef.current === urlItemId) return;
+    const target = items.find((i) => i.id === urlItemId);
+    if (target) {
+      openedUrlItemRef.current = urlItemId;
+      setEditingItem(target);
+    }
+  }, [items]);
+
   const tabId = useRef(getTabClientId()).current;
   const lastFetchTimeRef = useRef(0);
   const trailingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -293,11 +309,26 @@ export function Dashboard() {
     };
   }, []);
 
+  const [activeReminderBanner, setActiveReminderBanner] = useState<{
+    id: string;
+    title: string;
+    itemId?: string;
+  } | null>(null);
+
   useLiveSync({
     enabled: Boolean(user),
     tabId,
     onSync: deduplicatedRefetch,
     onAuthError: logout,
+    onEvent: (event) => {
+      if (event.type === "reminder_delivered" && event.title) {
+        setActiveReminderBanner({
+          id: event.id,
+          title: event.title,
+          itemId: event.itemId,
+        });
+      }
+    },
   });
 
   // Keep hasProcessing in sync with capture statuses after each fetch
@@ -1762,6 +1793,22 @@ export function Dashboard() {
         onConfirm={confirmDialog.onConfirm}
         onCancel={() => setConfirmDialog((prev) => ({ ...prev, isOpen: false }))}
       />
+
+      {activeReminderBanner && (
+        <ReminderBanner
+          reminder={activeReminderBanner}
+          onOpenItem={(itemId) => {
+            setActiveReminderBanner(null);
+            if (itemId) {
+              const target = items.find((i) => i.id === itemId);
+              if (target) {
+                setEditingItem(target);
+              }
+            }
+          }}
+          onDismiss={() => setActiveReminderBanner(null)}
+        />
+      )}
     </div>
   );
 }
