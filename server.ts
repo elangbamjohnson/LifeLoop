@@ -2,11 +2,7 @@ import "dotenv/config";
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import cookieParser from "cookie-parser";
-import pinoHttp from "pino-http";
-
 import { createApp } from "./src/server/app";
-import { errorHandler } from "./src/server/middlewares/errorHandler";
 import { apiNotFound } from "./src/server/middlewares/apiNotFound";
 import { db } from "./src/db";
 import { users } from "./src/db/schema";
@@ -67,9 +63,6 @@ async function startServer() {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
-
-  // Error Handler (must be last)
-  app.use(errorHandler);
 
   // HOST resolution: HOST env var wins (lets the caller inject any interface).
   // Outside production, default to 127.0.0.1 (numeric loopback) — never "localhost",
