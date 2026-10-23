@@ -130,7 +130,9 @@ describe("Phase 3: Reminders, Life Timeline & Real Dashboard", () => {
 
   // Test 5: Changed deadlines recalculate relative reminders
   it("should automatically reschedule relative reminders when item deadline changes", async () => {
-    const newDueDate = "2026-10-25T14:00:00Z";
+    // Dynamically compute future date to avoid time-decay failure
+    const futureDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const newDueDate = futureDate.toISOString();
 
     const res = await request(app)
       .patch(`/api/v1/items/${sampleItemId}`)
@@ -139,16 +141,18 @@ describe("Phase 3: Reminders, Life Timeline & Real Dashboard", () => {
 
     expect(res.status).toBe(200);
 
-    // Verify reminders were updated to match the new October date
+    // Verify reminders were updated to match the new date
     const remindersRes = await request(app)
       .get(`/api/v1/items/${sampleItemId}/reminders`)
       .set("Cookie", authCookie);
 
     expect(remindersRes.status).toBe(200);
-    const sameDayReminder = remindersRes.body.reminders.find((r: any) => r.relativeOffsetDays === 0);
-    if (sameDayReminder) {
-      expect(new Date(sameDayReminder.scheduledAt).getUTCMonth()).toBe(9); // Oct
-    }
+    const sameDayReminder = remindersRes.body.reminders.find(
+      (r: any) => r.relativeOffsetDays === 0 && r.status === "scheduled"
+    );
+    expect(sameDayReminder).toBeDefined();
+    expect(new Date(sameDayReminder.scheduledAt).getUTCMonth()).toBe(futureDate.getUTCMonth());
+    expect(new Date(sameDayReminder.scheduledAt).getUTCDate()).toBe(futureDate.getUTCDate());
   });
 
   // Test 6: Snooze and Completion
