@@ -34,6 +34,9 @@ async function startServer() {
     if (!process.env.GEMINI_API_KEY) {
       throw new Error("FATAL: GEMINI_API_KEY environment variable is missing in production. Fix: Set GEMINI_API_KEY in your production environment variables (e.g. export GEMINI_API_KEY=\"<your_gemini_api_key>\").");
     }
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      throw new Error("FATAL: GOOGLE_CLIENT_ID environment variable is missing in production. Fix: Set GOOGLE_CLIENT_ID in your Render environment variables (Google Cloud Console → Credentials → OAuth 2.0 Client ID).");
+    }
     if (process.env.MAIL_PROVIDER === "brevo") {
       const missingBrevoVars: string[] = [];
       if (!process.env.BREVO_API_KEY) missingBrevoVars.push("BREVO_API_KEY");
