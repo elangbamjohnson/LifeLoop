@@ -13,7 +13,7 @@ import { isValidTimezone } from "../../../shared/utils/timezone";
 
 export const authRouter = Router();
 
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+export const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -154,10 +154,43 @@ authRouter.post("/google", authLimiter, async (req, res, next) => {
         sub: parts[2] || `google_sub_${Date.now()}`,
       };
     } else {
-      const ticket = await googleClient.verifyIdToken({
-        idToken: credential,
-        audience: process.env.GOOGLE_CLIENT_ID,
-      });
+      let ticket;
+      try {
+        ticket = await googleClient.verifyIdToken({
+          idToken: credential,
+          audience: process.env.GOOGLE_CLIENT_ID,
+        });
+      } catch (verifyError: any) {
+        // Log the full error so Render logs show the exact failure reason.
+        req.log.error(
+          {
+            err: verifyError,
+            errCode: verifyError?.code,
+            errMessage: verifyError?.message,
+            googleClientIdPresent: !!process.env.GOOGLE_CLIENT_ID,
+          },
+          "[google-auth] verifyIdToken failed"
+        );
+
+        const msg: string = verifyError?.message ?? "";
+        const isNetworkError =
+          verifyError?.code === "ECONNREFUSED" ||
+          verifyError?.code === "ETIMEDOUT" ||
+          verifyError?.code === "ENOTFOUND" ||
+          verifyError?.code === "ERR_NETWORK" ||
+          msg.toLowerCase().includes("network") ||
+          msg.toLowerCase().includes("fetch failed");
+
+        if (isNetworkError) {
+          return res.status(503).json({
+            error: "Google authentication is temporarily unavailable. Please try again.",
+          });
+        }
+
+        // Token is invalid / expired / wrong audience — client error.
+        return res.status(400).json({ error: "Invalid Google credential." });
+      }
+
       const googlePayload = ticket.getPayload();
       if (!googlePayload || !googlePayload.email) {
         return res.status(400).json({ error: "Invalid Google token payload" });
