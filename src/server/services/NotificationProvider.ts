@@ -3,6 +3,7 @@ import { notificationLogs, reminders, pushSubscriptions } from "../../db/schema"
 import { eq } from "drizzle-orm";
 import webPush from "web-push";
 import { getMailSender, getAppUrl, MockMailSender } from "./MailSender";
+import { isSupportedPushEndpoint } from "./pushEndpoint";
 
 function sanitizeErrorMessage(msg: string): string {
   if (!msg) return "Push delivery failed";
@@ -91,10 +92,11 @@ export class WebNotificationProvider implements ChannelProvider {
       // Fetch user subscriptions
       let subscriptions: (typeof pushSubscriptions.$inferSelect)[] = [];
       try {
-        subscriptions = await db
+        const storedSubscriptions = await db
           .select()
           .from(pushSubscriptions)
           .where(eq(pushSubscriptions.userId, payload.userId));
+        subscriptions = storedSubscriptions.filter(({ endpoint }) => isSupportedPushEndpoint(endpoint));
       } catch (loadError: any) {
         console.warn(
           `[WebNotificationProvider] Failed to load push subscriptions: ${sanitizeErrorMessage(loadError?.message || "Database error")}`

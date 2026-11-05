@@ -7,6 +7,7 @@ import { db } from "../src/db";
 import { users, pushSubscriptions, reminders, items } from "../src/db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { createTestApp } from "./setup";
+import { createApp } from "../src/server/app";
 import { WebNotificationProvider } from "../src/server/services/NotificationProvider";
 import { reminderService } from "../src/server/services/ReminderService";
 
@@ -72,8 +73,13 @@ describe("Web Push Notifications (tests/web_push.test.ts)", () => {
   });
 
   // 1. Subscribe test
-  it("subscribe: stores a subscription for authenticated user", async () => {
-    const endpoint = `https://push.example.com/sub-${uuidv4()}`;
+  it.each([
+    "https://fcm.googleapis.com/fcm/send/sub-",
+    "https://updates.push.services.mozilla.com/wpush/v2/sub-",
+    "https://web.push.apple.com/Qsub-",
+    "https://wns2-bl2p.notify.windows.com/?token=sub-",
+  ])("subscribe: stores a subscription for %s", async (baseEndpoint) => {
+    const endpoint = `${baseEndpoint}${uuidv4()}`;
     const res = await request(app)
       .post("/api/v1/push/subscribe")
       .set("Cookie", authCookie)
@@ -100,9 +106,54 @@ describe("Web Push Notifications (tests/web_push.test.ts)", () => {
     expect(saved.auth).toBe("mock_auth_string");
   });
 
+  it.each([
+    "https://127.0.0.1/internal",
+    "https://example.com/collect",
+    "http://fcm.googleapis.com/fcm/send/sub",
+    "https://fcm.googleapis.com:8443/fcm/send/sub",
+    "https://user@fcm.googleapis.com/fcm/send/sub",
+    "https://fcm.googleapis.com@127.0.0.1/internal",
+    "https://web.push.apple.com.example.com/sub",
+    "https://evilpush.apple.com/sub",
+  ])("subscribe: rejects and does not store %s", async (endpoint) => {
+    const res = await request(app)
+      .post("/api/v1/push/subscribe")
+      .set("Cookie", authCookie)
+      .send({ endpoint, keys: { p256dh: "key", auth: "auth" } });
+
+    expect(res.status).toBe(400);
+    const saved = await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.endpoint, endpoint));
+    expect(saved).toHaveLength(0);
+  });
+
+  it("subscribe: lets the owner refresh a subscription and blocks another account from overwriting it", async () => {
+    const [owner] = await db.insert(users).values({
+      email: `push_owner_${uuidv4()}@example.com`,
+      accountStatus: "active",
+    }).returning();
+    createdUserIds.push(owner.id);
+    const endpoint = `https://fcm.googleapis.com/fcm/send/sub-owner-${uuidv4()}`;
+    await db.insert(pushSubscriptions).values({ userId: owner.id, endpoint, p256dh: "old", auth: "old" });
+
+    const refreshed = await request(app)
+      .post("/api/v1/push/subscribe")
+      .set("Cookie", `session=${jwt.sign({ userId: owner.id }, JWT_SECRET)}`)
+      .send({ endpoint, keys: { p256dh: "updated-key", auth: "updated-auth" } });
+    expect(refreshed.status).toBe(200);
+
+    const takeover = await request(app)
+      .post("/api/v1/push/subscribe")
+      .set("Cookie", authCookie)
+      .send({ endpoint, keys: { p256dh: "other-key", auth: "other-auth" } });
+    expect(takeover.status).toBe(409);
+
+    const [saved] = await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.endpoint, endpoint));
+    expect(saved).toMatchObject({ userId: owner.id, p256dh: "updated-key", auth: "updated-auth" });
+  });
+
   // 2. Unsubscribe test
   it("unsubscribe: deletes subscription when turning off push", async () => {
-    const endpoint = `https://push.example.com/sub-${uuidv4()}`;
+    const endpoint = `https://fcm.googleapis.com/fcm/send/sub-${uuidv4()}`;
     await db.insert(pushSubscriptions).values({
       userId: testUserId,
       endpoint,
@@ -128,8 +179,8 @@ describe("Web Push Notifications (tests/web_push.test.ts)", () => {
 
   // 3. Success to 2 subscriptions
   it("success to 2 subscriptions: sends push to both and returns delivered with count", async () => {
-    const endpoint1 = `https://push.example.com/sub-1-${uuidv4()}`;
-    const endpoint2 = `https://push.example.com/sub-2-${uuidv4()}`;
+    const endpoint1 = `https://fcm.googleapis.com/fcm/send/sub-1-${uuidv4()}`;
+    const endpoint2 = `https://fcm.googleapis.com/fcm/send/sub-2-${uuidv4()}`;
 
     await db.insert(pushSubscriptions).values([
       { userId: testUserId, endpoint: endpoint1, p256dh: "p1", auth: "a1" },
@@ -157,10 +208,34 @@ describe("Web Push Notifications (tests/web_push.test.ts)", () => {
     expect(webPush.sendNotification).toHaveBeenCalledTimes(2);
   });
 
+  it("skips unsupported subscriptions already stored in the database", async () => {
+    const endpoint = `https://fcm.googleapis.com/fcm/send/sub-${uuidv4()}`;
+    await db.insert(pushSubscriptions).values([
+      { userId: testUserId, endpoint: "https://127.0.0.1/internal", p256dh: "old", auth: "old" },
+      { userId: testUserId, endpoint, p256dh: "key", auth: "auth" },
+    ]);
+    vi.mocked(webPush.sendNotification).mockResolvedValue({ statusCode: 201 });
+
+    const result = await webProvider.send({
+      reminderId: uuidv4(),
+      userId: testUserId,
+      title: "Test Reminder",
+      body: "Reminder body",
+      channel: "web",
+      scheduledAt: new Date(),
+    }, "idem-skip-unsupported");
+
+    expect(result.payload.pushed).toBe(1);
+    expect(webPush.sendNotification).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ endpoint }),
+      expect.any(String)
+    );
+  });
+
   // 4. One 410 that deletes only that subscription
   it("one 410 that deletes only that subscription: deletes expired subscription without counting as failure", async () => {
-    const ep410 = `https://push.example.com/sub-410-${uuidv4()}`;
-    const epValid = `https://push.example.com/sub-valid-${uuidv4()}`;
+    const ep410 = `https://fcm.googleapis.com/fcm/send/sub-410-${uuidv4()}`;
+    const epValid = `https://fcm.googleapis.com/fcm/send/sub-valid-${uuidv4()}`;
 
     await db.insert(pushSubscriptions).values([
       { userId: testUserId, endpoint: ep410, p256dh: "p410", auth: "a410" },
@@ -208,7 +283,7 @@ describe("Web Push Notifications (tests/web_push.test.ts)", () => {
 
   // 5. All-fail returning failed (and a reminder going back to scheduled with deliveryAttempts +1)
   it("all-fail returning failed (and a reminder going back to scheduled with deliveryAttempts +1)", async () => {
-    const failEp = `https://push.example.com/sub-fail-${uuidv4()}`;
+    const failEp = `https://fcm.googleapis.com/fcm/send/sub-fail-${uuidv4()}`;
     await db.insert(pushSubscriptions).values({
       userId: testUserId,
       endpoint: failEp,
@@ -299,7 +374,7 @@ describe("Web Push Notifications (tests/web_push.test.ts)", () => {
 
   // 7. An exception that is caught
   it("an exception that is caught: provider never throws on unexpected error", async () => {
-    const endpoint = `https://push.example.com/sub-ex-${uuidv4()}`;
+    const endpoint = `https://fcm.googleapis.com/fcm/send/sub-ex-${uuidv4()}`;
     await db.insert(pushSubscriptions).values({
       userId: testUserId,
       endpoint,
@@ -446,4 +521,16 @@ describe("Web Push Notifications (tests/web_push.test.ts)", () => {
     expect(res.status).toBe(200);
     expect(res.body.publicKey).toBe("test-vapid-public-key-value");
   });
+});
+
+it.each(["development", "production"] as const)("hides E2E routes in %s even with mock email enabled", async (environment) => {
+  vi.stubEnv("NODE_ENV", environment);
+  vi.stubEnv("EMAIL_PROVIDER", "mock");
+  try {
+    const app = request(createApp());
+    await app.post("/api/v1/test/publish-event").send({ userId: uuidv4(), event: {} }).expect(404);
+    await app.get("/api/v1/test/mock-emails").expect(404);
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });

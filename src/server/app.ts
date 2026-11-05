@@ -77,7 +77,7 @@ export function createApp(options: CreateAppOptions = {}): express.Application {
   }
 
   // E2E Test utilities
-  if (process.env.EMAIL_PROVIDER === 'mock' || process.env.NODE_ENV === 'test') {
+  if (process.env.NODE_ENV === 'test') {
     app.get("/api/v1/test/mock-emails", async (req, res) => {
       const { getEmailProvider } = await import("./services/EmailProvider");
       const provider: any = getEmailProvider();

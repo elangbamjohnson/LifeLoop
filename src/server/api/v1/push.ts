@@ -3,6 +3,7 @@ import { db } from "../../../db";
 import { pushSubscriptions } from "../../../db/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, AuthenticatedRequest } from "../../middlewares/auth";
+import { isSupportedPushEndpoint } from "../../services/pushEndpoint";
 
 export const pushRouter = Router();
 
@@ -22,13 +23,16 @@ pushRouter.post("/subscribe", requireAuth, async (req: AuthenticatedRequest, res
     const auth = subObj.keys?.auth || subObj.auth;
     const userAgent = body.userAgent || subObj.userAgent || (req.headers["user-agent"] as string) || null;
 
-    if (!endpoint || !p256dh || !auth) {
+    if (!endpoint || typeof p256dh !== "string" || !p256dh || typeof auth !== "string" || !auth) {
       return res.status(400).json({
         error: "Missing required push subscription parameters: endpoint, p256dh, auth",
       });
     }
+    if (!isSupportedPushEndpoint(endpoint)) {
+      return res.status(400).json({ error: "Unsupported push subscription endpoint" });
+    }
 
-    await db
+    const [saved] = await db
       .insert(pushSubscriptions)
       .values({
         userId: req.userId!,
@@ -40,13 +44,18 @@ pushRouter.post("/subscribe", requireAuth, async (req: AuthenticatedRequest, res
       .onConflictDoUpdate({
         target: pushSubscriptions.endpoint,
         set: {
-          userId: req.userId!,
           p256dh,
           auth,
           userAgent,
           createdAt: new Date(),
         },
-      });
+        setWhere: eq(pushSubscriptions.userId, req.userId!),
+      })
+      .returning({ id: pushSubscriptions.id });
+
+    if (!saved) {
+      return res.status(409).json({ error: "This browser subscription is already registered to another account" });
+    }
 
     res.status(200).json({ success: true });
   } catch (error) {
