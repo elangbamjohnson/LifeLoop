@@ -19,6 +19,7 @@ const app = createTestApp('/api/v1/items', itemsRouter);
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_development_only";
 
 describe("Phase 3: Reminders, Life Timeline & Real Dashboard", () => {
+  const timezone = "America/New_York";
   let testUserId: string;
   let authCookie: string;
   let sampleItemId: string;
@@ -31,7 +32,7 @@ describe("Phase 3: Reminders, Life Timeline & Real Dashboard", () => {
         email: `phase3_${uuidv4()}@example.com`,
         passwordHash: "dummy",
         settings: {
-          timezone: "America/New_York",
+          timezone,
           autoReminders: false,
           channels: ["web", "email"],
         },
@@ -130,25 +131,29 @@ describe("Phase 3: Reminders, Life Timeline & Real Dashboard", () => {
 
   // Test 5: Changed deadlines recalculate relative reminders
   it("should automatically reschedule relative reminders when item deadline changes", async () => {
-    const newDueDate = "2026-10-25T14:00:00Z";
+    const newDueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    // At 02:00 UTC, the deadline still falls on the previous day in New York.
+    newDueDate.setUTCHours(2, 0, 0, 0);
 
     const res = await request(app)
       .patch(`/api/v1/items/${sampleItemId}`)
       .set("Cookie", authCookie)
-      .send({ dueDate: newDueDate });
+      .send({ dueDate: newDueDate.toISOString() });
 
     expect(res.status).toBe(200);
 
-    // Verify reminders were updated to match the new October date
     const remindersRes = await request(app)
       .get(`/api/v1/items/${sampleItemId}/reminders`)
       .set("Cookie", authCookie);
 
     expect(remindersRes.status).toBe(200);
-    const sameDayReminder = remindersRes.body.reminders.find((r: any) => r.relativeOffsetDays === 0);
-    if (sameDayReminder) {
-      expect(new Date(sameDayReminder.scheduledAt).getUTCMonth()).toBe(9); // Oct
-    }
+    const sameDayReminder = remindersRes.body.reminders.find(
+      (r: any) => r.triggerType === "relative_to_deadline" && r.relativeOffsetDays === 0 && r.status === "scheduled"
+    );
+    expect(sameDayReminder).toBeDefined();
+
+    const localDate = new Intl.DateTimeFormat("en-US", { timeZone: timezone, dateStyle: "short" });
+    expect(localDate.format(new Date(sameDayReminder.scheduledAt))).toBe(localDate.format(newDueDate));
   });
 
   // Test 6: Snooze and Completion
