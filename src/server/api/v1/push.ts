@@ -9,8 +9,20 @@ export const pushRouter = Router();
 
 // GET /api/v1/push/public-key
 pushRouter.get("/public-key", requireAuth, async (req: AuthenticatedRequest, res) => {
-  const publicKey = process.env.VAPID_PUBLIC_KEY || "";
+  const publicKey = process.env.VAPID_PRIVATE_KEY ? process.env.VAPID_PUBLIC_KEY || "" : "";
   res.json({ publicKey });
+});
+
+pushRouter.post("/status", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const endpoint = req.body?.endpoint;
+    if (typeof endpoint !== "string") return res.status(400).json({ error: "Endpoint is required" });
+    const [subscription] = await db.select({ id: pushSubscriptions.id }).from(pushSubscriptions)
+      .where(and(eq(pushSubscriptions.userId, req.userId!), eq(pushSubscriptions.endpoint, endpoint))).limit(1);
+    res.json({ registered: Boolean(subscription), available: Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) });
+  } catch (error) {
+    next(error);
+  }
 });
 
 // POST /api/v1/push/subscribe
@@ -68,22 +80,23 @@ pushRouter.delete("/subscribe", requireAuth, async (req: AuthenticatedRequest, r
   try {
     const endpoint = (req.body?.endpoint || req.query?.endpoint) as string | undefined;
 
+    let removed;
     if (endpoint) {
-      await db
+      removed = await db
         .delete(pushSubscriptions)
         .where(
           and(
             eq(pushSubscriptions.userId, req.userId!),
             eq(pushSubscriptions.endpoint, endpoint)
           )
-        );
+        ).returning({ id: pushSubscriptions.id });
     } else {
-      await db
+      removed = await db
         .delete(pushSubscriptions)
-        .where(eq(pushSubscriptions.userId, req.userId!));
+        .where(eq(pushSubscriptions.userId, req.userId!)).returning({ id: pushSubscriptions.id });
     }
 
-    res.json({ success: true });
+    res.json({ success: true, removed: removed.length > 0 });
   } catch (error) {
     next(error);
   }

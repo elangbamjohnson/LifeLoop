@@ -1,6 +1,9 @@
 import { test, expect, Page } from '@playwright/test';
 import { authenticateAndSeedSession } from './fixtures';
 
+// These tests mock browser push APIs; keep service workers from bypassing API routes.
+test.use({ serviceWorkers: 'block' });
+
 async function openPreferencesModal(page: Page) {
   if (await page.locator('#preferences-modal-card').isVisible()) return;
 
@@ -126,7 +129,15 @@ test.describe('push notifications', () => {
         requestPermission: async () => 'granted',
       };
       (window as any).PushManager = class {};
+      Object.defineProperty(navigator.serviceWorker, 'getRegistration', {
+        value: async () => ({ pushManager: { getSubscription: async () => ({ endpoint: 'https://fcm.googleapis.com/fcm/send/test' }) } }),
+        configurable: true,
+      });
     });
+
+    await page.route('**/api/v1/push/status', route => route.fulfill({
+      json: { registered: true, available: true },
+    }));
 
     await authenticateAndSeedSession(page, request, baseURL!);
     await page.goto(baseURL!);

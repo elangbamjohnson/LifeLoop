@@ -89,7 +89,7 @@ export async function submitCapture(
 export { submitCapture as handleCaptureSubmit };
 
 export function Dashboard() {
-  const { user, loading: authLoading, logout } = useAuth();
+  const { user, loading: authLoading, logout, logoutError } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const isAdmin = Boolean(!authLoading && user?.isAdmin);
   const [activeTab, setActiveTab] = useState<"priority" | "timeline" | "captures" | "ask" | "graph" | "family">("priority");
@@ -1082,6 +1082,7 @@ export function Dashboard() {
           Same search element in every mode.
           ──────────────────────────────────────────────────────────────────── */}
       <main className="main-viewport max-w-4xl mx-auto px-4 sm:px-6 pt-4 pb-8 space-y-6">
+        {logoutError && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{logoutError}</p>}
         {/* Search Bar - Single element in every mode, scrolls with feed */}
         <div className="relative w-full">
           <Search className="w-4 h-4 text-[#A8A29E] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />

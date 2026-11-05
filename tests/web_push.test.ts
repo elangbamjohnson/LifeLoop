@@ -151,6 +151,31 @@ describe("Web Push Notifications (tests/web_push.test.ts)", () => {
     expect(saved).toMatchObject({ userId: owner.id, p256dh: "updated-key", auth: "updated-auth" });
   });
 
+  it("status: requires authentication and only confirms the current account's subscription", async () => {
+    const endpoint = `https://fcm.googleapis.com/fcm/send/status-${uuidv4()}`;
+    await db.insert(pushSubscriptions).values({ userId: testUserId, endpoint, p256dh: "key", auth: "auth" });
+    await request(app).post("/api/v1/push/status").send({ endpoint }).expect(401);
+    const owned = await request(app).post("/api/v1/push/status").set("Cookie", authCookie).send({ endpoint });
+    expect(owned.body).toEqual({ registered: true, available: true });
+    const [other] = await db.insert(users).values({ email: `push_status_${uuidv4()}@example.com`, accountStatus: "active" }).returning();
+    createdUserIds.push(other.id);
+    const otherCookie = `session=${jwt.sign({ userId: other.id }, JWT_SECRET)}`;
+    const unowned = await request(app).post("/api/v1/push/status").set("Cookie", otherCookie).send({ endpoint });
+    expect(unowned.body).toEqual({ registered: false, available: true });
+    const removal = await request(app).delete("/api/v1/push/subscribe").set("Cookie", otherCookie).send({ endpoint });
+    expect(removal.body.removed).toBe(false);
+    const [remaining] = await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.endpoint, endpoint));
+    expect(remaining.userId).toBe(testUserId);
+  });
+
+  it("status: reports unavailable and withholds the public key when the private key is missing", async () => {
+    delete process.env.VAPID_PRIVATE_KEY;
+    const status = await request(app).post("/api/v1/push/status").set("Cookie", authCookie).send({ endpoint: "https://fcm.googleapis.com/fcm/send/missing" });
+    expect(status.body).toEqual({ registered: false, available: false });
+    const key = await request(app).get("/api/v1/push/public-key").set("Cookie", authCookie);
+    expect(key.body.publicKey).toBe("");
+  });
+
   // 2. Unsubscribe test
   it("unsubscribe: deletes subscription when turning off push", async () => {
     const endpoint = `https://fcm.googleapis.com/fcm/send/sub-${uuidv4()}`;

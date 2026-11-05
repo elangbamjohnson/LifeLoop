@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { X, Bell, Globe, Moon, ShieldCheck, Check, Loader2 } from "lucide-react";
 import { getTabClientId } from "../../utils/tabId";
 import { extractApiErrorMessage, NETWORK_ERROR_MESSAGE } from "../../lib/apiError";
+import { disableBrowserPush, getBrowserPushSubscription, isPushRegistered } from "../../lib/pushSubscription";
 
 interface PreferencesModalProps {
   isOpen: boolean;
@@ -27,8 +28,8 @@ export function urlBase64ToUint8Array(base64String: string): Uint8Array {
 }
 
 export function computePushState(
-  channels: string[],
-  permissionStatus: string
+  permissionStatus: string,
+  registered: boolean = false
 ): PushState {
   if (typeof window === "undefined") return "not supported";
 
@@ -61,7 +62,7 @@ export function computePushState(
     return "blocked";
   }
 
-  if (channels.includes("web") && permissionStatus === "granted") {
+  if (registered && permissionStatus === "granted") {
     return "on";
   }
 
@@ -79,6 +80,8 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
   const [permissionStatus, setPermissionStatus] = useState<string>(
     typeof Notification !== "undefined" && Notification.permission ? Notification.permission : "default"
   );
+  const [pushRegistered, setPushRegistered] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -101,6 +104,23 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
         }
       })
       .catch(console.error);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    setPushBusy(true);
+    getBrowserPushSubscription()
+      .then(async (subscription) => subscription ? await isPushRegistered(subscription) : false)
+      .then((registered) => { if (!cancelled) setPushRegistered(registered); })
+      .catch(() => {
+        if (!cancelled) {
+          setPushRegistered(false);
+          setErrorMessage("Couldn't check notification status. Please try again.");
+        }
+      })
+      .finally(() => { if (!cancelled) setPushBusy(false); });
+    return () => { cancelled = true; };
   }, [isOpen]);
 
   const previousActiveElement = useRef<HTMLElement | null>(null);
@@ -127,98 +147,48 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
 
   if (!isOpen) return null;
 
-  const requestWebPermission = async () => {
-    if (typeof Notification === "undefined") return;
-
-    try {
-      const perm = await Notification.requestPermission();
-      setPermissionStatus(perm);
-
-      if (perm === "granted") {
-        try {
-          const keyRes = await fetch("/api/v1/push/public-key");
-          if (keyRes.ok) {
-            const { publicKey } = await keyRes.json();
-            if (publicKey && "serviceWorker" in navigator) {
-              const reg =
-                (await navigator.serviceWorker.ready.catch(() => null)) ||
-                (await navigator.serviceWorker.getRegistration());
-              if (reg && reg.pushManager) {
-                const sub = await reg.pushManager.subscribe({
-                  userVisibleOnly: true,
-                  applicationServerKey: urlBase64ToUint8Array(publicKey),
-                });
-                const subJson = sub.toJSON();
-                await fetch("/api/v1/push/subscribe", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    endpoint: sub.endpoint,
-                    keys: subJson.keys,
-                    userAgent: navigator.userAgent,
-                  }),
-                });
-              }
-            }
-          }
-        } catch (e) {
-          console.warn("Could not register push subscription on server:", e);
-        }
-
-        if (!channels.includes("web")) {
-          setChannels((prev) => [...prev, "web"]);
-        }
-      }
-    } catch (err) {
-      console.error("Error requesting notification permission:", err);
-    }
-  };
-
   const handleToggleWebPush = async () => {
-    if (errorMessage) setErrorMessage(null);
-    const currentState = computePushState(channels, permissionStatus);
-
-    if (currentState === "on") {
-      try {
-        let endpoint: string | undefined;
-        if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
-          const reg = await navigator.serviceWorker.getRegistration();
-          const sub = await reg?.pushManager?.getSubscription();
-          if (sub) {
-            endpoint = sub.endpoint;
-            await sub.unsubscribe().catch(() => {});
-          }
-        }
-
-        await fetch("/api/v1/push/subscribe", {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: endpoint ? JSON.stringify({ endpoint }) : undefined,
-        }).catch(() => {});
-      } catch (err) {
-        console.warn("Failed to delete push subscription:", err);
+    if (pushBusy) return;
+    setErrorMessage(null);
+    setPushBusy(true);
+    try {
+      if (pushRegistered) {
+        await disableBrowserPush();
+        setPushRegistered(false);
+        setChannels((previous) => previous.filter((channel) => channel !== "web"));
+        return;
       }
 
-      setChannels((prev) => prev.filter((c) => c !== "web"));
-      return;
-    }
+      const state = computePushState(permissionStatus, pushRegistered);
+      if (state === "not supported") throw new Error("Web push notifications are not supported in this browser.");
+      if (state === "on iOS but not installed to the Home Screen") throw new Error("Add LifeLoop to your Home Screen to enable notifications.");
+      const permission = await Notification.requestPermission();
+      setPermissionStatus(permission);
+      if (permission !== "granted") throw new Error("Allow notifications in your browser settings to receive reminders.");
 
-    if (currentState === "blocked") {
-      setErrorMessage("Notifications are blocked in your browser settings. Please enable them to receive push reminders.");
-      return;
+      const keyResponse = await fetch("/api/v1/push/public-key");
+      if (!keyResponse.ok) throw new Error(await extractApiErrorMessage(keyResponse, "changes"));
+      const { publicKey } = await keyResponse.json();
+      if (!publicKey) throw new Error("Push notifications are unavailable. Please try again later.");
+      const registration = await navigator.serviceWorker.getRegistration();
+      if (!registration?.active || !registration.pushManager) throw new Error("Notifications are still getting ready. Please reload and try again.");
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+      const response = await fetch("/api/v1/push/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint: subscription.endpoint, keys: subscription.toJSON().keys, userAgent: navigator.userAgent }),
+      });
+      if (!response.ok) throw new Error(await extractApiErrorMessage(response, "changes"));
+      setPushRegistered(true);
+      setChannels((previous) => previous.includes("web") ? previous : [...previous, "web"]);
+    } catch (error) {
+      setErrorMessage(error instanceof TypeError ? NETWORK_ERROR_MESSAGE : error instanceof Error ? error.message : "Couldn't update notifications. Please try again.");
+    } finally {
+      setPushBusy(false);
     }
-
-    if (currentState === "on iOS but not installed to the Home Screen") {
-      setErrorMessage("On iOS, push notifications require adding LifeLoop to your Home Screen.");
-      return;
-    }
-
-    if (currentState === "not supported") {
-      setErrorMessage("Web push notifications are not supported in this browser.");
-      return;
-    }
-
-    await requestWebPermission();
   };
 
   const toggleChannel = async (ch: string) => {
@@ -234,7 +204,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (saving) return;
+    if (saving || pushBusy) return;
     setSaving(true);
     setSavedSuccess(false);
     setErrorMessage(null);
@@ -444,7 +414,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {/* In-App / Push Row */}
               {(() => {
-                const pushState = computePushState(channels, permissionStatus);
+                const pushState = computePushState(permissionStatus, pushRegistered);
                 return (
                   <div
                     id="channel-web-row"
@@ -452,6 +422,8 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
                     role="button"
                     tabIndex={0}
                     aria-label="In-App / Push Notifications"
+                    aria-disabled={pushBusy}
+                    aria-busy={pushBusy}
                     onClick={() => toggleChannel("web")}
                     onKeyDown={(e) => {
                       if (e.key === " " || e.key === "Enter") {
@@ -543,12 +515,13 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
             </div>
 
             {/* Browser Permission Prompt Helper */}
-            {typeof Notification !== "undefined" && permissionStatus !== "granted" && computePushState(channels, permissionStatus) !== "not supported" && computePushState(channels, permissionStatus) !== "on iOS but not installed to the Home Screen" && (
+            {typeof Notification !== "undefined" && permissionStatus !== "granted" && computePushState(permissionStatus, pushRegistered) !== "not supported" && computePushState(permissionStatus, pushRegistered) !== "on iOS but not installed to the Home Screen" && (
               <div className="mt-2.5">
                 <button
                   type="button"
                   id="grant-notification-permission-btn"
-                  onClick={requestWebPermission}
+                  onClick={handleToggleWebPush}
+                  disabled={pushBusy}
                   className="touch-target-48 min-h-[48px] px-2 text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-lg"
                 >
                   <ShieldCheck className="w-3.5 h-3.5" />
@@ -651,7 +624,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
             <button
               type="submit"
               id="preferences-save-btn"
-              disabled={saving}
+              disabled={saving || pushBusy}
               className="touch-target-48 min-h-[48px] px-6 py-2.5 rounded-full bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] text-xs sm:text-sm font-semibold shadow-xs hover:opacity-90 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 w-full sm:w-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-500"
             >
               {saving ? (
