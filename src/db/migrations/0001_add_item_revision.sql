@@ -1,0 +1,1 @@
+ALTER TABLE "items" ADD COLUMN IF NOT EXISTS "revision" integer DEFAULT 1 NOT NULL;

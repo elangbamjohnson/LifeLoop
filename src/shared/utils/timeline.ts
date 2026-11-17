@@ -10,7 +10,9 @@ export interface TimelineItem {
   completedAt?: string | null;
   confidenceScore?: number | null;
   metadata?: Record<string, any> | null;
+  revision?: number;
   createdAt: string;
+  updatedAt?: string;
   badgeText?: string;
   /**
    * "review"   – pending_review (never confused with date-based urgency)

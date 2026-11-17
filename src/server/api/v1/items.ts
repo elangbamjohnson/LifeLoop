@@ -85,7 +85,9 @@ itemsRouter.get("/timeline", requireAuth, async (req: AuthenticatedRequest, res,
       completedAt: item.completedAt ? item.completedAt.toISOString() : null,
       confidenceScore: item.confidenceScore as number | null,
       metadata: item.metadata as Record<string, any> | null,
+      revision: item.revision,
       createdAt: item.createdAt.toISOString(),
+      updatedAt: item.updatedAt ? item.updatedAt.toISOString() : undefined,
     }));
 
     const timeline = groupItemsIntoTimeline(timelineItems, new Date());
@@ -174,41 +176,50 @@ itemsRouter.post("/:id/calendar-added", requireAuth, async (req: AuthenticatedRe
       return res.status(400).json({ error: "Invalid format for identifier" });
     }
 
-    const [item] = await db
-      .select()
-      .from(items)
-      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
-      .limit(1);
+    const updated = await db.transaction(async (tx) => {
+      const [item] = await tx
+        .select()
+        .from(items)
+        .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
+        .for("update");
 
-    if (!item) {
+      if (!item) {
+        return null;
+      }
+
+      const existingMeta = (item.metadata as Record<string, any>) || {};
+      const hasExplicitTime = Boolean(existingMeta.hasExplicitTime);
+      const dueDateStr = item.dueDate ? item.dueDate.toISOString() : null;
+
+      const calendarAdded = {
+        at: new Date().toISOString(),
+        dueDate: dueDateStr,
+        hasExplicitTime,
+      };
+
+      const updatedMetadata = {
+        ...existingMeta,
+        calendarAdded,
+      };
+
+      const [updatedItem] = await tx
+        .update(items)
+        .set({
+          metadata: updatedMetadata,
+          revision: sql`${items.revision} + 1`,
+          updatedAt: sql`now()`,
+        })
+        .where(and(eq(items.id, id), eq(items.userId, req.userId!), eq(items.revision, item.revision)))
+        .returning();
+
+      return updatedItem;
+    });
+
+    if (!updated) {
       return res.status(404).json({ error: "Item not found" });
     }
 
-    const existingMeta = (item.metadata as Record<string, any>) || {};
-    const hasExplicitTime = Boolean(existingMeta.hasExplicitTime);
-    const dueDateStr = item.dueDate ? item.dueDate.toISOString() : null;
-
-    const calendarAdded = {
-      at: new Date().toISOString(),
-      dueDate: dueDateStr,
-      hasExplicitTime,
-    };
-
-    const updatedMetadata = {
-      ...existingMeta,
-      calendarAdded,
-    };
-
-    const [updated] = await db
-      .update(items)
-      .set({
-        metadata: updatedMetadata,
-        updatedAt: sql`now()`,
-      })
-      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
-      .returning();
-
-    // Cross-device sync via existing item-update path on EventBus
+    // Cross-device sync via existing item-update path on EventBus (post-commit)
     eventBus.publish(req.userId!, {
       type: "changed",
       entity: "item",
@@ -231,29 +242,38 @@ itemsRouter.delete("/:id/calendar-added", requireAuth, async (req: Authenticated
       return res.status(400).json({ error: "Invalid format for identifier" });
     }
 
-    const [item] = await db
-      .select()
-      .from(items)
-      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
-      .limit(1);
+    const updated = await db.transaction(async (tx) => {
+      const [item] = await tx
+        .select()
+        .from(items)
+        .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
+        .for("update");
 
-    if (!item) {
+      if (!item) {
+        return null;
+      }
+
+      const existingMeta = (item.metadata as Record<string, any>) || {};
+      const { calendarAdded: _removed, ...restMeta } = existingMeta;
+
+      const [updatedItem] = await tx
+        .update(items)
+        .set({
+          metadata: restMeta,
+          revision: sql`${items.revision} + 1`,
+          updatedAt: sql`now()`,
+        })
+        .where(and(eq(items.id, id), eq(items.userId, req.userId!), eq(items.revision, item.revision)))
+        .returning();
+
+      return updatedItem;
+    });
+
+    if (!updated) {
       return res.status(404).json({ error: "Item not found" });
     }
 
-    const existingMeta = (item.metadata as Record<string, any>) || {};
-    const { calendarAdded: _removed, ...restMeta } = existingMeta;
-
-    const [updated] = await db
-      .update(items)
-      .set({
-        metadata: restMeta,
-        updatedAt: sql`now()`,
-      })
-      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
-      .returning();
-
-    // Cross-device sync via existing item-update path on EventBus
+    // Cross-device sync via existing item-update path on EventBus (post-commit)
     eventBus.publish(req.userId!, {
       type: "changed",
       entity: "item",
@@ -348,18 +368,41 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
       return res.status(400).json({ error: "Invalid format for identifier" });
     }
 
-    const [existingItem] = await db
-      .select()
-      .from(items)
-      .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
-      .limit(1);
+    // Validate expected-revision if supplied (preferred: expectedRevision, alias: revision)
+    let expectedRevision: number | undefined = undefined;
+    const rawRevision =
+      req.body.expectedRevision !== undefined
+        ? req.body.expectedRevision
+        : req.body.revision !== undefined
+          ? req.body.revision
+          : undefined;
 
-    if (!existingItem) {
-      return res.status(404).json({ error: "Item not found or could not be updated" });
+    if (rawRevision !== undefined) {
+      if (
+        typeof rawRevision === "number" &&
+        Number.isInteger(rawRevision) &&
+        rawRevision >= 1
+      ) {
+        expectedRevision = rawRevision;
+      } else if (
+        typeof rawRevision === "string" &&
+        /^[1-9]\d*$/.test(rawRevision.trim())
+      ) {
+        expectedRevision = parseInt(rawRevision.trim(), 10);
+      } else {
+        return res.status(400).json({
+          error: "Invalid expectedRevision: must be a positive integer",
+          code: "INVALID_REVISION",
+        });
+      }
     }
 
     const { status, title, itemType, dueDate, metadata, snoozedUntil, hasExplicitTime: bodyHasExplicitTime } = req.body;
-    
+
+    if (title !== undefined && (typeof title !== "string" || !title.trim())) {
+      return res.status(400).json({ error: "Title cannot be empty" });
+    }
+
     // Determine if we need to auto-adjust completedAt based on incoming status
     let completedAt: Date | null | undefined = undefined;
     if (status === "completed") {
@@ -368,117 +411,144 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
       completedAt = null;
     }
 
-    const existingMeta = (existingItem.metadata as any) || {};
-    const baseMetadata = metadata !== undefined ? { ...metadata } : { ...existingMeta };
-
-    // Resolve hasExplicitTime:
-    // If not provided in request body, preserve the existing item's flag (behavior for PATCH dueDate edit with no hasExplicitTime).
-    // If provided in body (at top-level or inside metadata), use the provided boolean.
-    let resolvedHasExplicitTime: boolean;
-    if (bodyHasExplicitTime !== undefined) {
-      resolvedHasExplicitTime = Boolean(bodyHasExplicitTime);
-    } else if (metadata?.hasExplicitTime !== undefined) {
-      resolvedHasExplicitTime = Boolean(metadata.hasExplicitTime);
-    } else {
-      resolvedHasExplicitTime = Boolean(existingMeta.hasExplicitTime);
-    }
-
-    // Determine user's timezone for date/time calculations
+    // Determine user's timezone for date/time calculations (do NOT persist yet until item update succeeds)
     const [user] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
     const savedTimezone = (user?.settings as any)?.timezone;
+    const headerTz = req.headers["x-timezone"] as string | undefined;
+    const hasValidHeaderTz = headerTz ? isValidTimezone(headerTz) : false;
+
     let userTimezone = isValidTimezone(savedTimezone) ? savedTimezone : null;
-    if (!userTimezone && req.headers["x-timezone"]) {
-      const headerTz = req.headers["x-timezone"] as string;
-      if (isValidTimezone(headerTz)) {
-        userTimezone = headerTz;
-        const currentSettings = (user?.settings as any) || {};
-        await db.update(users).set({ settings: { ...currentSettings, timezone: userTimezone } }).where(eq(users.id, req.userId!));
-      }
+    let shouldPersistTimezone = false;
+    if (!userTimezone && hasValidHeaderTz && headerTz) {
+      userTimezone = headerTz;
+      shouldPersistTimezone = true;
     }
     userTimezone = userTimezone || "UTC";
 
-    let resolvedDueDate: Date | null | undefined = undefined;
-    if (dueDate !== undefined) {
-      if (!dueDate) {
-        resolvedDueDate = null;
-      } else if (typeof dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
-        const [y, m, d] = dueDate.split("-").map(Number);
-        if (resolvedHasExplicitTime && existingItem.dueDate) {
-          // Keep the item's existing local time of day in the user's timezone, change only the date
-          const existingDate = new Date(existingItem.dueDate);
-          const timeParts = new Intl.DateTimeFormat("en-US", {
-            timeZone: userTimezone,
-            hour: "numeric",
-            minute: "numeric",
-            second: "numeric",
-            hour12: false,
-          }).formatToParts(existingDate);
-
-          let hour = 9, minute = 0, second = 0;
-          for (const p of timeParts) {
-            if (p.type === "hour") hour = parseInt(p.value, 10);
-            if (p.type === "minute") minute = parseInt(p.value, 10);
-            if (p.type === "second") second = parseInt(p.value, 10);
-          }
-          if (hour === 24) hour = 0;
-
-          resolvedDueDate = reminderService.calculateScheduledDate(
-            new Date(Date.UTC(y, m - 1, d)),
-            0,
-            hour,
-            minute,
-            userTimezone
-          );
-        } else {
-          // Date-only items keep 09:00 local in user's timezone
-          resolvedDueDate = reminderService.calculateScheduledDate(
-            new Date(Date.UTC(y, m - 1, d)),
-            0,
-            9,
-            0,
-            userTimezone
-          );
-        }
-      } else {
-        resolvedDueDate = new Date(dueDate);
-      }
-    }
-
-    const updatePayload: any = {};
-    if (status !== undefined) updatePayload.status = status;
-    if (title !== undefined) updatePayload.title = title;
-    if (itemType !== undefined) updatePayload.itemType = itemType;
-    if (snoozedUntil !== undefined) {
-      updatePayload.snoozedUntil = snoozedUntil ? new Date(snoozedUntil) : null;
-    }
-    if (dueDate !== undefined) {
-      updatePayload.dueDate = resolvedDueDate;
-    }
-    if (completedAt !== undefined) {
-      updatePayload.completedAt = completedAt;
-    }
-
-    // Explicitly set userEdited flag in metadata whenever an item is updated via PATCH,
-    // and persist hasExplicitTime flag
-    const incomingMeta = (metadata as Record<string, any>) || {};
-    updatePayload.metadata = {
-      ...existingMeta,
-      ...incomingMeta,
-      hasExplicitTime: resolvedHasExplicitTime,
-      userEdited: true,
-    };
-    updatePayload.updatedAt = sql`now()`;
-
     const eventsToPublish: Array<{ userId: string; event: any }> = [];
-    const updatedItem = await db.transaction(async (tx) => {
+
+    // Atomically verify ownership, compare revision, and apply update under row lock
+    const txResult = await db.transaction(async (tx) => {
+      const [existingItem] = await tx
+        .select()
+        .from(items)
+        .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
+        .for("update");
+
+      if (!existingItem) {
+        return { outcome: "not_found" as const };
+      }
+
+      // Check revision precondition atomically
+      if (expectedRevision !== undefined && existingItem.revision !== expectedRevision) {
+        return {
+          outcome: "conflict" as const,
+          currentRevision: existingItem.revision,
+        };
+      }
+
+      // If user timezone was missing and supplied via valid X-Timezone header, persist now that update is authorized
+      if (shouldPersistTimezone && userTimezone) {
+        const currentSettings = (user?.settings as any) || {};
+        await tx
+          .update(users)
+          .set({ settings: { ...currentSettings, timezone: userTimezone } })
+          .where(eq(users.id, req.userId!));
+      }
+
+      const existingMeta = (existingItem.metadata as Record<string, any>) || {};
+
+      // Resolve hasExplicitTime:
+      let resolvedHasExplicitTime: boolean;
+      if (bodyHasExplicitTime !== undefined) {
+        resolvedHasExplicitTime = Boolean(bodyHasExplicitTime);
+      } else if (metadata?.hasExplicitTime !== undefined) {
+        resolvedHasExplicitTime = Boolean(metadata.hasExplicitTime);
+      } else {
+        resolvedHasExplicitTime = Boolean(existingMeta.hasExplicitTime);
+      }
+
+      let resolvedDueDate: Date | null | undefined = undefined;
+      if (dueDate !== undefined) {
+        if (!dueDate) {
+          resolvedDueDate = null;
+        } else if (typeof dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+          const [y, m, d] = dueDate.split("-").map(Number);
+          if (resolvedHasExplicitTime && existingItem.dueDate) {
+            const existingDate = new Date(existingItem.dueDate);
+            const timeParts = new Intl.DateTimeFormat("en-US", {
+              timeZone: userTimezone,
+              hour: "numeric",
+              minute: "numeric",
+              second: "numeric",
+              hour12: false,
+            }).formatToParts(existingDate);
+
+            let hour = 9, minute = 0, second = 0;
+            for (const p of timeParts) {
+              if (p.type === "hour") hour = parseInt(p.value, 10);
+              if (p.type === "minute") minute = parseInt(p.value, 10);
+              if (p.type === "second") second = parseInt(p.value, 10);
+            }
+            if (hour === 24) hour = 0;
+
+            resolvedDueDate = reminderService.calculateScheduledDate(
+              new Date(Date.UTC(y, m - 1, d)),
+              0,
+              hour,
+              minute,
+              userTimezone
+            );
+          } else {
+            resolvedDueDate = reminderService.calculateScheduledDate(
+              new Date(Date.UTC(y, m - 1, d)),
+              0,
+              9,
+              0,
+              userTimezone
+            );
+          }
+        } else {
+          resolvedDueDate = new Date(dueDate);
+        }
+      }
+
+      const updatePayload: any = {};
+      if (status !== undefined) updatePayload.status = status;
+      if (title !== undefined) updatePayload.title = title.trim();
+      if (itemType !== undefined) updatePayload.itemType = itemType;
+      if (snoozedUntil !== undefined) {
+        updatePayload.snoozedUntil = snoozedUntil ? new Date(snoozedUntil) : null;
+      }
+      if (dueDate !== undefined) {
+        updatePayload.dueDate = resolvedDueDate;
+      }
+      if (completedAt !== undefined) {
+        updatePayload.completedAt = completedAt;
+      }
+
+      // Preserve existing metadata + merge incoming + userEdited flag
+      const incomingMeta = (metadata as Record<string, any>) || {};
+      updatePayload.metadata = {
+        ...existingMeta,
+        ...incomingMeta,
+        hasExplicitTime: resolvedHasExplicitTime,
+        userEdited: true,
+      };
+      updatePayload.revision = existingItem.revision + 1;
+      updatePayload.updatedAt = sql`now()`;
+
       const [updated] = await tx
         .update(items)
         .set(updatePayload)
-        .where(and(eq(items.id, id), eq(items.userId, req.userId!)))
+        .where(and(eq(items.id, id), eq(items.userId, req.userId!), eq(items.revision, existingItem.revision)))
         .returning();
 
-      // If deadline was provided in payload, automatically reschedule reminders
-      if (dueDate !== undefined) {
+      // Reminders are ONLY adjusted if dueDate or status was changed; title edits do not reschedule reminders
+      // Item completion must cancel pending reminders even when the same request changes the due date
+      if (status === "completed") {
+        await reminderService.syncItemReminderLifecycle(id, req.userId!, "complete", undefined, tx, eventsToPublish);
+      } else if (dueDate !== undefined) {
         await reminderService.syncItemReminderLifecycle(
           id,
           req.userId!,
@@ -492,17 +562,24 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
           tx,
           eventsToPublish
         );
-      }
-
-      // If completed or reopened, adjust reminders via lifecycle sync
-      if (status === "completed") {
-        await reminderService.syncItemReminderLifecycle(id, req.userId!, "complete", undefined, tx, eventsToPublish);
       } else if (status === "active") {
         await reminderService.syncItemReminderLifecycle(id, req.userId!, "reopen", undefined, tx, eventsToPublish);
       }
 
-      return updated;
+      return { outcome: "success" as const, item: updated };
     });
+
+    // Handle responses strictly outside transaction callback
+    if (txResult.outcome === "not_found") {
+      return res.status(404).json({ error: "Item not found or could not be updated" });
+    }
+    if (txResult.outcome === "conflict") {
+      return res.status(409).json({
+        error: "Item has been modified by another session",
+        code: "REVISION_CONFLICT",
+        currentRevision: txResult.currentRevision,
+      });
+    }
 
     // POST-COMMIT: Publish collected events
     for (const { userId, event } of eventsToPublish) {
@@ -511,12 +588,12 @@ itemsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res, ne
     eventBus.publish(req.userId!, {
       type: "changed",
       entity: "item",
-      id: updatedItem.id,
+      id: txResult.item.id,
       at: new Date().toISOString(),
       origin: req.headers["x-client-id"] as string | undefined,
     });
-      
-    res.json({ item: updatedItem });
+
+    return res.json({ item: txResult.item });
   } catch (error) {
     next(error);
   }

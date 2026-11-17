@@ -42,6 +42,8 @@ export function formatDateForDateInput(d: Date | string | null | undefined, time
 export function ItemEditModal({ item, isOpen, onClose, onSave, userTimezone }: ItemEditModalProps) {
   if (!isOpen || !item) return null;
 
+  // Capture base item for the editing session to keep drafts paired with their base revision
+  const [baseItem, setBaseItem] = useState<TimelineItem>(item);
   const [title, setTitle] = useState(item.title);
   const [itemType, setItemType] = useState(item.itemType || "task");
   
@@ -60,8 +62,10 @@ export function ItemEditModal({ item, isOpen, onClose, onSave, userTimezone }: I
   // Relative reminder offset checkboxes
   const [selectedOffsets, setSelectedOffsets] = useState<number[]>([-7, -1, 0]);
   const [saving, setSaving] = useState(false);
+  const [conflictError, setConflictError] = useState<string | null>(null);
 
   useEffect(() => {
+    setBaseItem(item);
     setTitle(item.title);
     setItemType(item.itemType || "task");
     const d = item.dueDate || (item.metadata as any)?.dueDate || (item.metadata as any)?.expiryDate;
@@ -70,7 +74,8 @@ export function ItemEditModal({ item, isOpen, onClose, onSave, userTimezone }: I
     setAmount(item.metadata?.amount?.toString() || "");
     setCurrency(item.metadata?.currency || "INR");
     setWaitingFor(item.metadata?.waitingFor || "");
-  }, [item, userTimezone]);
+    setConflictError(null);
+  }, [item?.id, isOpen, userTimezone]);
 
   const toggleOffset = (offset: number) => {
     setSelectedOffsets((prev) =>
@@ -81,20 +86,22 @@ export function ItemEditModal({ item, isOpen, onClose, onSave, userTimezone }: I
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    setConflictError(null);
     try {
       const updatedMetadata = {
-        ...(item.metadata || {}),
+        ...(baseItem.metadata || {}),
         ...(amount ? { amount: parseFloat(amount) } : {}),
         currency,
         ...(waitingFor ? { waitingFor } : {}),
         ...(isDueDateModified ? (dueDate ? { dueDate } : { dueDate: null }) : {}),
       };
 
-      const payload: Partial<TimelineItem> & { reminderOffsets?: number[]; recurrence?: string; channel?: string } = {
-        id: item.id,
+      const payload: Partial<TimelineItem> & { expectedRevision?: number; reminderOffsets?: number[]; recurrence?: string; channel?: string } = {
+        id: baseItem.id,
         title,
         itemType,
-        status: item.status === "pending_review" ? "active" : item.status,
+        status: baseItem.status === "pending_review" ? "active" : baseItem.status,
+        expectedRevision: baseItem.revision,
         metadata: updatedMetadata,
         reminderOffsets: selectedOffsets,
         recurrence,
@@ -107,8 +114,9 @@ export function ItemEditModal({ item, isOpen, onClose, onSave, userTimezone }: I
 
       await onSave(payload);
       onClose();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to save item edit:", err);
+      setConflictError(err.message || "This item was modified by another session. Please review and try again.");
     } finally {
       setSaving(false);
     }
@@ -134,6 +142,12 @@ export function ItemEditModal({ item, isOpen, onClose, onSave, userTimezone }: I
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {conflictError && (
+          <div className="mt-4 p-3.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs text-red-700 dark:text-red-300 font-medium">
+            {conflictError}
+          </div>
+        )}
 
         <form onSubmit={handleFormSubmit} className="mt-5 space-y-5">
           {/* Title */}

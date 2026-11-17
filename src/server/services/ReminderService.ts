@@ -1,6 +1,6 @@
 import { db } from "../../db";
 import { reminders, items, users } from "../../db/schema";
-import { eq, and, lte, or } from "drizzle-orm";
+import { eq, and, lte, or, sql } from "drizzle-orm";
 import { notificationDispatcher } from "./NotificationProvider";
 import { eventBus } from "./EventBus";
 
@@ -646,6 +646,8 @@ export class ReminderService {
       .set({
         snoozedUntil: snoozeUntil,
         status: "snoozed",
+        revision: sql`${items.revision} + 1`,
+        updatedAt: new Date(),
       })
       .where(and(eq(items.id, itemId), eq(items.userId, userId)))
       .returning();
@@ -678,6 +680,8 @@ export class ReminderService {
         .set({
           status: completed ? "completed" : "active",
           completedAt: completed ? new Date() : null,
+          revision: sql`${items.revision} + 1`,
+          updatedAt: new Date(),
         })
         .where(and(eq(items.id, itemId), eq(items.userId, userId)))
         .returning();
