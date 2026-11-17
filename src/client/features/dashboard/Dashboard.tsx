@@ -428,13 +428,24 @@ export function Dashboard() {
         headers: { "Content-Type": "application/json", "X-Client-Id": tabId, "X-Timezone": Intl.DateTimeFormat().resolvedOptions().timeZone },
         body: JSON.stringify(updated),
       });
+      if (res.status === 409) {
+        const errorData = await res.json().catch(() => ({}));
+        showToast("Conflict: This item was modified elsewhere. Your changes were not saved.");
+        fetchData();
+        throw new Error(errorData.error || "Item was modified by another session");
+      }
       if (res.ok) {
         showToast("Changes saved");
         fetchData();
         setEditingItem(null);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.error || "Failed to save changes");
+        throw new Error(err.error || "Failed to save changes");
       }
     } catch (err) {
       console.error(err);
+      throw err;
     }
   };
 

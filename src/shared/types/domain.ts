@@ -38,6 +38,7 @@ export const ItemSchema = z.object({
   type: z.enum(["task", "event", "bill", "note", "person", "document"]),
   status: z.enum(["active", "completed", "archived"]),
   metadata: z.record(z.string(), z.any()).optional(),
+  revision: z.number().int().positive().default(1),
   createdAt: z.date(),
   updatedAt: z.date(),
 });

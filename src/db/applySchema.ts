@@ -89,9 +89,11 @@ export async function applySchema(sql: postgres.Sql, targetSchema: string): Prom
       snoozed_until TIMESTAMP WITH TIME ZONE,
       completed_at TIMESTAMP WITH TIME ZONE,
       metadata JSONB DEFAULT '{}'::jsonb,
+      revision INTEGER NOT NULL DEFAULT 1,
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE ${targetSchema}.items ADD COLUMN IF NOT EXISTS revision INTEGER NOT NULL DEFAULT 1;
 
     CREATE TABLE IF NOT EXISTS ${targetSchema}.reminders (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

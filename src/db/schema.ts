@@ -66,6 +66,7 @@ export const items = pgTable("items", {
   snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   metadata: jsonb("metadata").default({}), // amounts, dates, custom fields based on type
+  revision: integer("revision").default(1).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
 });

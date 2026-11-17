@@ -1,6 +1,6 @@
 import { db } from "../../db";
 import { items, captures, users, itemRelations, reminders } from "../../db/schema";
-import { eq, and, or, asc } from "drizzle-orm";
+import { eq, and, or, asc, sql } from "drizzle-orm";
 import { reminderService } from "./ReminderService";
 import { GoogleGenAI } from "@google/genai";
 import { isValidTimezone } from "../../shared/utils/timezone";
@@ -199,7 +199,10 @@ export async function enrichExistingItems(
   parsedItems: any[],
   rawPayload: string,
   autoRemindersEnabled: boolean,
-  userTimezone: string
+  userTimezone: string,
+  options?: {
+    onBeforeItemUpdate?: (existingItem: typeof items.$inferSelect) => Promise<void> | void;
+  }
 ): Promise<void> {
   const existingItems = await db
     .select()
@@ -317,15 +320,35 @@ export async function enrichExistingItems(
         continue;
       }
 
-      await db.update(items).set({
-        title: aiItem.title,
-        itemType: aiItem.itemType || "task",
-        dueDate: parsedDueDate,
-        confidenceScore: typeof aiItem.confidenceScore === "number" ? aiItem.confidenceScore : 0.85,
-        metadata: metadataToSave,
-        status: targetStatus,
-        updatedAt: new Date(),
-      }).where(eq(items.id, existingItem.id));
+      if (options?.onBeforeItemUpdate) {
+        await options.onBeforeItemUpdate(existingItem);
+      }
+
+      const [updated] = await db
+        .update(items)
+        .set({
+          title: aiItem.title,
+          itemType: aiItem.itemType || "task",
+          dueDate: parsedDueDate,
+          confidenceScore: typeof aiItem.confidenceScore === "number" ? aiItem.confidenceScore : 0.85,
+          metadata: metadataToSave,
+          status: targetStatus,
+          revision: sql`${items.revision} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(items.id, existingItem.id),
+            eq(items.revision, existingItem.revision),
+            sql`coalesce((${items.metadata}->>'userEdited')::boolean, false) = false`
+          )
+        )
+        .returning();
+
+      if (!updated) {
+        console.log(`[AI Enrichment] Preserving user-modified or concurrently updated item ${existingItem.id}`);
+        continue;
+      }
 
       if (suggestedRelationTargetId) {
         try {
