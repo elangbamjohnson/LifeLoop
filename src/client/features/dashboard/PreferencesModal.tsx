@@ -2,10 +2,71 @@ import React, { useState, useEffect, useRef } from "react";
 import { X, Bell, Globe, Moon, ShieldCheck, Check, Loader2 } from "lucide-react";
 import { getTabClientId } from "../../utils/tabId";
 import { extractApiErrorMessage, NETWORK_ERROR_MESSAGE } from "../../lib/apiError";
+import { disableBrowserPush, getBrowserPushSubscription, isPushRegistered } from "../../lib/pushSubscription";
 
 interface PreferencesModalProps {
   isOpen: boolean;
   onClose: () => void;
+}
+
+export type PushState =
+  | "not supported"
+  | "on iOS but not installed to the Home Screen"
+  | "blocked"
+  | "on"
+  | "off";
+
+export function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+export function computePushState(
+  permissionStatus: string,
+  registered: boolean = false
+): PushState {
+  if (typeof window === "undefined") return "not supported";
+
+  const isIOS =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+  const isStandalone =
+    (window.navigator as any).standalone === true ||
+    (typeof window.matchMedia === "function" &&
+      window.matchMedia("(display-mode: standalone)").matches);
+
+  if (isIOS && !isStandalone) {
+    return "on iOS but not installed to the Home Screen";
+  }
+
+  const hasPushSupport =
+    "Notification" in window &&
+    Boolean(window.Notification) &&
+    "serviceWorker" in navigator &&
+    Boolean(navigator.serviceWorker) &&
+    "PushManager" in window &&
+    Boolean((window as any).PushManager);
+
+  if (!hasPushSupport) {
+    return "not supported";
+  }
+
+  if (permissionStatus === "denied") {
+    return "blocked";
+  }
+
+  if (registered && permissionStatus === "granted") {
+    return "on";
+  }
+
+  return "off";
 }
 
 export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
@@ -17,8 +78,10 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
   const [quietHoursStart, setQuietHoursStart] = useState("22:00");
   const [quietHoursEnd, setQuietHoursEnd] = useState("08:00");
   const [permissionStatus, setPermissionStatus] = useState<string>(
-    typeof Notification !== "undefined" ? Notification.permission : "unsupported"
+    typeof Notification !== "undefined" && Notification.permission ? Notification.permission : "default"
   );
+  const [pushRegistered, setPushRegistered] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -41,6 +104,23 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
         }
       })
       .catch(console.error);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    setPushBusy(true);
+    getBrowserPushSubscription()
+      .then(async (subscription) => subscription ? await isPushRegistered(subscription) : false)
+      .then((registered) => { if (!cancelled) setPushRegistered(registered); })
+      .catch(() => {
+        if (!cancelled) {
+          setPushRegistered(false);
+          setErrorMessage("Couldn't check notification status. Please try again.");
+        }
+      })
+      .finally(() => { if (!cancelled) setPushBusy(false); });
+    return () => { cancelled = true; };
   }, [isOpen]);
 
   const previousActiveElement = useRef<HTMLElement | null>(null);
@@ -67,26 +147,64 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
 
   if (!isOpen) return null;
 
-  const requestWebPermission = async () => {
-    if (typeof Notification !== "undefined") {
-      const perm = await Notification.requestPermission();
-      setPermissionStatus(perm);
-      if (perm === "granted" && !channels.includes("web")) {
-        setChannels([...channels, "web"]);
+  const handleToggleWebPush = async () => {
+    if (pushBusy) return;
+    setErrorMessage(null);
+    setPushBusy(true);
+    try {
+      if (pushRegistered) {
+        await disableBrowserPush();
+        setPushRegistered(false);
+        setChannels((previous) => previous.filter((channel) => channel !== "web"));
+        return;
       }
+
+      const state = computePushState(permissionStatus, pushRegistered);
+      if (state === "not supported") throw new Error("Web push notifications are not supported in this browser.");
+      if (state === "on iOS but not installed to the Home Screen") throw new Error("Add LifeLoop to your Home Screen to enable notifications.");
+      const permission = await Notification.requestPermission();
+      setPermissionStatus(permission);
+      if (permission !== "granted") throw new Error("Allow notifications in your browser settings to receive reminders.");
+
+      const keyResponse = await fetch("/api/v1/push/public-key");
+      if (!keyResponse.ok) throw new Error(await extractApiErrorMessage(keyResponse, "changes"));
+      const { publicKey } = await keyResponse.json();
+      if (!publicKey) throw new Error("Push notifications are unavailable. Please try again later.");
+      const registration = await navigator.serviceWorker.getRegistration();
+      if (!registration?.active || !registration.pushManager) throw new Error("Notifications are still getting ready. Please reload and try again.");
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+      const response = await fetch("/api/v1/push/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint: subscription.endpoint, keys: subscription.toJSON().keys, userAgent: navigator.userAgent }),
+      });
+      if (!response.ok) throw new Error(await extractApiErrorMessage(response, "changes"));
+      setPushRegistered(true);
+      setChannels((previous) => previous.includes("web") ? previous : [...previous, "web"]);
+    } catch (error) {
+      setErrorMessage(error instanceof TypeError ? NETWORK_ERROR_MESSAGE : error instanceof Error ? error.message : "Couldn't update notifications. Please try again.");
+    } finally {
+      setPushBusy(false);
     }
   };
 
-  const toggleChannel = (ch: string) => {
-    if (errorMessage) setErrorMessage(null);
-    setChannels((prev) =>
-      prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]
-    );
+  const toggleChannel = async (ch: string) => {
+    if (ch === "web") {
+      await handleToggleWebPush();
+    } else {
+      if (errorMessage) setErrorMessage(null);
+      setChannels((prev) =>
+        prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]
+      );
+    }
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (saving) return;
+    if (saving || pushBusy) return;
     setSaving(true);
     setSavedSuccess(false);
     setErrorMessage(null);
@@ -294,47 +412,116 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
               Delivery Channels
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {[
-                { id: "web", name: "In-App / Push", desc: "Native browser notification banners" },
-                { id: "email", name: "Email Digest", desc: "Actionable morning summary" },
-              ].map((ch) => (
-                <div
-                  key={ch.id}
-                  onClick={() => toggleChannel(ch.id)}
-                  className={`touch-target-48 min-h-[48px] p-3.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
-                    channels.includes(ch.id)
-                      ? "border-[#1C1917] dark:border-[#FDFBF7] bg-white dark:bg-[#292524] shadow-xs"
-                      : "border-[#E7E5E4] dark:border-[#44403C] hover:bg-black/5 dark:hover:bg-white/5"
-                  }`}
-                >
-                  <div className="min-w-0 pr-2">
-                    <div className="text-xs font-medium text-[#1C1917] dark:text-[#FDFBF7] truncate">
-                      {ch.name}
-                    </div>
-                    <div className="text-[11px] text-[#78716C] dark:text-[#A8A29E] truncate">
-                      {ch.desc}
-                    </div>
-                  </div>
+              {/* In-App / Push Row */}
+              {(() => {
+                const pushState = computePushState(permissionStatus, pushRegistered);
+                return (
                   <div
-                    className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
-                      channels.includes(ch.id)
-                        ? "bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] border-transparent"
-                        : "border-[#D6D3D1] dark:border-[#57534E]"
+                    id="channel-web-row"
+                    data-testid="channel-web-row"
+                    role="button"
+                    tabIndex={0}
+                    aria-label="In-App / Push Notifications"
+                    aria-disabled={pushBusy}
+                    aria-busy={pushBusy}
+                    onClick={() => toggleChannel("web")}
+                    onKeyDown={(e) => {
+                      if (e.key === " " || e.key === "Enter") {
+                        e.preventDefault();
+                        toggleChannel("web");
+                      }
+                    }}
+                    className={`touch-target-48 min-h-[48px] p-3.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                      pushState === "on"
+                        ? "border-[#1C1917] dark:border-[#FDFBF7] bg-white dark:bg-[#292524] shadow-xs"
+                        : "border-[#E7E5E4] dark:border-[#44403C] hover:bg-black/5 dark:hover:bg-white/5"
                     }`}
                   >
-                    {channels.includes(ch.id) && <Check className="w-3 h-3 stroke-[3]" />}
+                    <div className="min-w-0 pr-2 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs font-medium text-[#1C1917] dark:text-[#FDFBF7]">
+                          In-App / Push
+                        </span>
+                        <span
+                          data-testid="push-status-badge"
+                          className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md break-words ${
+                            pushState === "on"
+                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                              : pushState === "blocked"
+                              ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300"
+                              : pushState === "on iOS but not installed to the Home Screen"
+                              ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                              : "bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-400"
+                          }`}
+                        >
+                          {pushState}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-[#78716C] dark:text-[#A8A29E] truncate">
+                        Native browser notification banners
+                      </div>
+                    </div>
+                    <div
+                      className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                        pushState === "on"
+                          ? "bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] border-transparent"
+                          : "border-[#D6D3D1] dark:border-[#57534E]"
+                      }`}
+                    >
+                      {pushState === "on" && <Check className="w-3 h-3 stroke-[3]" />}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Email Digest Row */}
+              <div
+                id="channel-email-row"
+                data-testid="channel-email-row"
+                role="button"
+                tabIndex={0}
+                aria-label="Email Digest"
+                onClick={() => toggleChannel("email")}
+                onKeyDown={(e) => {
+                  if (e.key === " " || e.key === "Enter") {
+                    e.preventDefault();
+                    toggleChannel("email");
+                  }
+                }}
+                className={`touch-target-48 min-h-[48px] p-3.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                  channels.includes("email")
+                    ? "border-[#1C1917] dark:border-[#FDFBF7] bg-white dark:bg-[#292524] shadow-xs"
+                    : "border-[#E7E5E4] dark:border-[#44403C] hover:bg-black/5 dark:hover:bg-white/5"
+                }`}
+              >
+                <div className="min-w-0 pr-2 flex-1">
+                  <div className="text-xs font-medium text-[#1C1917] dark:text-[#FDFBF7] truncate">
+                    Email Digest
+                  </div>
+                  <div className="text-[11px] text-[#78716C] dark:text-[#A8A29E] truncate">
+                    Actionable morning summary
                   </div>
                 </div>
-              ))}
+                <div
+                  className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                    channels.includes("email")
+                      ? "bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] border-transparent"
+                      : "border-[#D6D3D1] dark:border-[#57534E]"
+                  }`}
+                >
+                  {channels.includes("email") && <Check className="w-3 h-3 stroke-[3]" />}
+                </div>
+              </div>
             </div>
 
             {/* Browser Permission Prompt Helper */}
-            {typeof Notification !== "undefined" && permissionStatus !== "granted" && (
+            {typeof Notification !== "undefined" && permissionStatus !== "granted" && computePushState(permissionStatus, pushRegistered) !== "not supported" && computePushState(permissionStatus, pushRegistered) !== "on iOS but not installed to the Home Screen" && (
               <div className="mt-2.5">
                 <button
                   type="button"
                   id="grant-notification-permission-btn"
-                  onClick={requestWebPermission}
+                  onClick={handleToggleWebPush}
+                  disabled={pushBusy}
                   className="touch-target-48 min-h-[48px] px-2 text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-lg"
                 >
                   <ShieldCheck className="w-3.5 h-3.5" />
@@ -437,7 +624,7 @@ export function PreferencesModal({ isOpen, onClose }: PreferencesModalProps) {
             <button
               type="submit"
               id="preferences-save-btn"
-              disabled={saving}
+              disabled={saving || pushBusy}
               className="touch-target-48 min-h-[48px] px-6 py-2.5 rounded-full bg-[#1C1917] dark:bg-[#FDFBF7] text-white dark:text-[#1C1917] text-xs sm:text-sm font-semibold shadow-xs hover:opacity-90 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 w-full sm:w-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-500"
             >
               {saving ? (
