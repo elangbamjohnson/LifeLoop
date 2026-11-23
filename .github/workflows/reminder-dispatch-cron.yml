@@ -16,20 +16,86 @@ jobs:
           RENDER_APP_URL: ${{ secrets.RENDER_APP_URL || 'https://lifeloop-45xr.onrender.com' }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          echo "Triggering reminder dispatch at $RENDER_APP_URL..."
-          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "$RENDER_APP_URL/api/v1/reminders/dispatch-now" \
-            -H "Content-Type: application/json" \
-            -H "X-Cron-Secret: $CRON_SECRET")
+          set -eo pipefail
 
-          BODY=$(echo "$RESPONSE" | sed -e '$d')
-          STATUS=$(echo "$RESPONSE" | tail -n1 | cut -d':' -f2)
+          USER_AGENT="LifeLoop-Cron/1.0 (GitHubActions; +https://github.com/elangbamjohnson/LifeLoop)"
+          MAX_ATTEMPTS=4
+          INITIAL_BACKOFF=5
 
-          echo "Response Body: $BODY"
-          echo "HTTP Status: $STATUS"
+          echo "Starting Scheduled Reminder Dispatch workflow..."
+          echo "Target URL: $RENDER_APP_URL"
 
-          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 300 ]; then
-            echo "Successfully dispatched reminders."
+          # 1. Warm-up probe: wake sleeping Render instance & initialize DB pool before dispatch
+          echo "Checking service readiness..."
+          WARMUP_SUCCESS=false
+          for WARM_ATTEMPT in 1 2 3; do
+            WARM_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              --connect-timeout 15 \
+              --max-time 45 \
+              -H "User-Agent: $USER_AGENT" \
+              "$RENDER_APP_URL/api/v1/readyz" || echo "000")
+
+            if [ "$WARM_STATUS" = "200" ]; then
+              echo "Service is ready (HTTP 200)."
+              WARMUP_SUCCESS=true
+              break
+            else
+              echo "Warm-up attempt $WARM_ATTEMPT: received HTTP $WARM_STATUS. Retrying in 5s..."
+              sleep 5
+            fi
+          done
+
+          if [ "$WARMUP_SUCCESS" = "false" ]; then
+            echo "Notice: Service readiness probe did not return 200 within timeout; proceeding with dispatch attempts..."
+          fi
+
+          # 2. Trigger reminder dispatch with retries and exponential backoff
+          DISPATCH_SUCCESS=false
+          for ATTEMPT in $(seq 1 $MAX_ATTEMPTS); do
+            echo "Dispatch attempt $ATTEMPT of $MAX_ATTEMPTS..."
+            TMP_BODY=$(mktemp)
+
+            HTTP_STATUS=$(curl -s -S \
+              --connect-timeout 30 \
+              --max-time 90 \
+              -o "$TMP_BODY" \
+              -w "%{http_code}" \
+              -X POST "$RENDER_APP_URL/api/v1/reminders/dispatch-now" \
+              -H "User-Agent: $USER_AGENT" \
+              -H "Content-Type: application/json" \
+              -H "X-Cron-Secret: $CRON_SECRET" || echo "000")
+
+            BODY=$(cat "$TMP_BODY" 2>/dev/null || true)
+            rm -f "$TMP_BODY"
+
+            echo "Response Status: $HTTP_STATUS"
+            echo "Response Body: $BODY"
+
+            if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+              echo "Successfully dispatched reminders on attempt $ATTEMPT."
+              DISPATCH_SUCCESS=true
+              break
+            fi
+
+            # Check for transient edge rate-limiting (429), server errors (5xx), or network resets (000)
+            if [ "$HTTP_STATUS" = "000" ] || [ "$HTTP_STATUS" = "429" ] || [ "$HTTP_STATUS" -ge 500 ]; then
+              if [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; then
+                BACKOFF=$(( INITIAL_BACKOFF * ATTEMPT ))
+                echo "Transient error (HTTP $HTTP_STATUS). Retrying in ${BACKOFF}s..."
+                sleep $BACKOFF
+                continue
+              else
+                echo "Error: Max retry attempts reached on transient error."
+              fi
+            else
+              echo "Fatal error (HTTP $HTTP_STATUS): Request rejected or unauthorized. Not retrying."
+              break
+            fi
+          done
+
+          if [ "$DISPATCH_SUCCESS" = "true" ]; then
+            exit 0
           else
-            echo "Error: Failed with status $STATUS"
+            echo "Error: Failed to dispatch reminders."
             exit 1
           fi
