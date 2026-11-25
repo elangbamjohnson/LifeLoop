@@ -36,6 +36,7 @@ describe('PreferencesModal Save Error Handling', () => {
     render(React.createElement(PreferencesModal, { isOpen: true, onClose }));
 
     const saveButton = screen.getByRole('button', { name: /save preferences/i });
+    await vi.waitFor(() => expect((saveButton as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(saveButton);
 
     await vi.waitFor(() => {
@@ -72,6 +73,7 @@ describe('PreferencesModal Save Error Handling', () => {
     render(React.createElement(PreferencesModal, { isOpen: true, onClose }));
 
     const saveButton = screen.getByRole('button', { name: /save preferences/i });
+    await vi.waitFor(() => expect((saveButton as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(saveButton);
 
     await vi.waitFor(() => {
@@ -112,6 +114,7 @@ describe('PreferencesModal Save Error Handling', () => {
     render(React.createElement(PreferencesModal, { isOpen: true, onClose }));
 
     const saveButton = screen.getByRole('button', { name: /save preferences/i });
+    await vi.waitFor(() => expect((saveButton as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(saveButton);
 
     await vi.waitFor(() => {
@@ -125,6 +128,7 @@ describe('PreferencesModal Save Error Handling', () => {
     expect((saveButton as HTMLButtonElement).disabled).toBe(false);
 
     // Save button works again: clicking it retries and succeeds, closing the modal
+    await vi.waitFor(() => expect((saveButton as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(saveButton);
     await vi.waitFor(() => {
       expect(onClose).toHaveBeenCalledTimes(1);

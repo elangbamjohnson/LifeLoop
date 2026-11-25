@@ -58,7 +58,7 @@ The application uses an abstraction layer for email delivery (`EmailProvider`).
 ### MockEmailProvider (Dev/Test)
 
 When `EMAIL_PROVIDER=mock`, emails are not sent over the network. Instead, they are captured in memory.
-- In E2E tests, Playwright accesses the captured emails via a dedicated `GET /api/v1/test/mock-emails` endpoint (only exposed when `EMAIL_PROVIDER=mock`). This allows tests to extract the real generated tokens and navigate to the verification URLs, simulating a complete user flow without requiring an external mailbox service.
+- In E2E tests, Playwright reads the captured emails via `GET /api/v1/test/mock-emails`, which is available only when `NODE_ENV=test`. This lets tests follow the generated verification links without an external mailbox service.
 
 ## 8. Existing User Migration
 

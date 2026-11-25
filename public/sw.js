@@ -1,5 +1,5 @@
 // LifeLoop Service Worker
-const CACHE_NAME = 'lifeloop-v2';
+const CACHE_NAME = 'lifeloop-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -85,3 +85,51 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
+// Push notification received event listener
+self.addEventListener('push', (event) => {
+  let data = {};
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch (e) {
+      data = { title: 'LifeLoop Reminder', body: event.data.text() };
+    }
+  }
+
+  const title = data.title || 'LifeLoop Reminder';
+  const options = {
+    body: data.body || 'You have a reminder from LifeLoop.',
+    icon: '/pwa-192x192.png',
+    badge: '/icon.svg',
+    data: {
+      url: data.url || (data.itemId ? `/?item=${encodeURIComponent(data.itemId)}` : '/'),
+      itemId: data.itemId,
+    },
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Notification clicked event listener
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const urlToOpen = event.notification.data?.url || '/';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      for (const client of windowClients) {
+        if ('focus' in client) {
+          if ('navigate' in client) {
+            client.navigate(urlToOpen);
+          }
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(urlToOpen);
+      }
+    })
+  );
+});
+

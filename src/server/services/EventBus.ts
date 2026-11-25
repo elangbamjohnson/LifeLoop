@@ -1,11 +1,14 @@
 import type { Response } from 'express';
 
 export interface SyncEvent {
-  type: 'changed';
-  entity: 'item' | 'capture' | 'reminder' | 'relation';
+  type: 'changed' | 'reminder_delivered' | string;
+  entity?: 'item' | 'capture' | 'reminder' | 'relation' | string;
   id?: string;
   at: string;
   origin?: string;
+  title?: string;
+  itemId?: string;
+  [key: string]: any;
 }
 
 export interface EventBusInterface {

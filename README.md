@@ -138,6 +138,21 @@ After a run both ports must be free:
 
 ## Production
 
+Before deploying Web Push, apply its additive migration from the deployment environment
+using that environment's database credentials.
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f docs/migrate-web-push.sql
+```
+
+The migration can be rerun safely. Generate a VAPID key pair with
+`npx web-push generate-vapid-keys`, then store `VAPID_PUBLIC_KEY`,
+`VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT` in the hosting provider's environment.
+Keep the same pair across deployments to preserve existing subscriptions.
+After deployment, enable notifications in Preferences and send a reminder to a
+test account with the browser closed. Verify delivery, opening the item, and
+signing out to stop notifications on that device.
+
 NODE_ENV=production is required. The server refuses to start if:
 - AI_PROVIDER=mock
 - DISABLE_RATE_LIMIT=1
